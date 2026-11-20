@@ -9,8 +9,8 @@ import re
 from datetime import date, timedelta
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.messages import AIMessage, AIMessageChunk
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
 from concierge.domain import NEIGHBOURHOODS, REGION
 
@@ -45,29 +45,47 @@ def _window(text: str, today: date) -> tuple[date, date] | None:
     return None
 
 
-def intake(inp: dict) -> dict:
-    text, today = inp["conversation"].lower(), date.fromisoformat(inp["today"])
-    out: dict = {"preferences": []}
+def intake(text: str, today: date) -> tuple[dict, list[str]]:
+    """Rules standing in for the model's understanding of a request: what we got, and what is still missing."""
+    text = text.lower()
+    args: dict = {"preferences": []}
     questions = []
-    if re.search(r"physio|back|neck|knee|shoulder|hip|ankle|sciatica|injur|sport|rehab|pain", text):
-        out["service_category"] = "physiotherapy"
-    else:
-        questions.append("I can only book physiotherapy at the moment. What do you need help with?")
-    place = next((n for n in NEIGHBOURHOODS if n.lower() in text), REGION if REGION.lower() in text or "anywhere" in text else None)
+    place = next((n for n in NEIGHBOURHOODS if n.lower() in text), REGION if REGION.lower() in text or "münchen" in text or "anywhere" in text else None)
     if place:
-        out["location"] = place
+        args["location"] = place
     else:
         questions.append(f"Which area would suit you? ({', '.join(NEIGHBOURHOODS)}, or anywhere in {REGION})")
     window = _window(text, today)
     if window:
-        out["date_from"], out["date_to"] = window[0].isoformat(), window[1].isoformat()
+        args["date_from"], args["date_to"] = window[0].isoformat(), window[1].isoformat()
     else:
         questions.append("When would you like to be seen? For example 'next week' or 'tomorrow'.")
     for word, phrase in PREFERENCE_WORDS.items():
-        if word in text and phrase not in out["preferences"]:
-            out["preferences"].append(phrase)
-    out["open_questions"] = questions[:1]  # one focused question at a time
-    return out
+        if word in text and phrase not in args["preferences"]:
+            args["preferences"].append(phrase)
+    return args, questions
+
+
+def chat(messages) -> AIMessage:
+    """The demo concierge: asks one question, or starts the research with `start_background`, then confirms. Only the
+    conversation after the last started research counts, as a real model would treat it."""
+    last_tool = max((i for i, m in enumerate(messages) if m.type == "tool"), default=-1)
+    if messages[-1].type == "tool":
+        try:
+            started = json.loads(str(messages[-1].content))["job_id"]
+        except (ValueError, KeyError, TypeError):  # the framework refused the input: say so, and ask again
+            return AIMessage(content="Sorry, I couldn't use that. Could you tell me the area and the dates again?")
+        call = next(m for m in reversed(messages) if m.type == "ai" and m.tool_calls).tool_calls[0]["args"]
+        done = json.loads(call["input_json"])
+        prefs = f" Preferences: {', '.join(done['preferences'])}." if done["preferences"] else ""
+        when = done["date_from"] if done["date_from"] == done["date_to"] else f"{done['date_from']} to {done['date_to']}"
+        return AIMessage(content=f"Here is what I understood: physiotherapy in {done['location']}, {when}.{prefs} I've started the research.")
+    text = " ".join(str(m.content) for m in messages[last_tool + 1 :] if m.type == "human")
+    args, questions = intake(text, date.today())
+    if questions:
+        return AIMessage(content=questions[0])  # one focused question at a time
+    call = {"agent_name": "research_providers", "input_json": json.dumps(args)}
+    return AIMessage(content="", tool_calls=[{"name": "start_background", "args": call, "id": "demo-start"}])
 
 
 def research(inp: dict, tool_text: str | None, tool_failed: bool) -> dict | tuple[str, dict]:
@@ -121,18 +139,25 @@ class RuleModel(BaseChatModel):
         return self
 
     def _generate(self, messages, stop=None, run_manager=None, **kwargs):
-        human = next(m for m in messages if m.type == "human")
-        inp = json.loads(str(human.content))
         self.counter += 1
-        call_id = f"demo-{self.counter}"
-        if self.role == "intake":
-            call = ("IntakeOutput", intake(inp))
-        elif self.role == "evaluator":
-            call = ("Evaluation", evaluate(inp))
-        else:
+        if self.role == "chat":
+            return ChatResult(generations=[ChatGeneration(message=chat(messages))])
+        inp = json.loads(str(next(m for m in messages if m.type == "human").content))  # the agent's input, as JSON
+        if self.role == "evaluator":
+            name, args = "Evaluation", evaluate(inp)
+        else:  # researcher: first call the tool, then answer from its result
             tool_msg = next((m for m in reversed(messages) if m.type == "tool"), None)
             result = research(inp, str(tool_msg.content) if tool_msg else None, bool(tool_msg and tool_msg.status == "error"))
-            call = result if isinstance(result, tuple) else ("Findings", result)
-        name, args = call
-        message = AIMessage(content="", tool_calls=[{"name": name, "args": args, "id": call_id}])
+            name, args = result if isinstance(result, tuple) else ("Findings", result)
+        message = AIMessage(content="", tool_calls=[{"name": name, "args": args, "id": f"demo-{self.counter}"}])
         return ChatResult(generations=[ChatGeneration(message=message)])
+
+    def _stream(self, messages, stop=None, run_manager=None, **kwargs):
+        """Stream the same answer in pieces, as a real model does: the words of a reply, or a tool call's arguments whole."""
+        answer = self._generate(messages).generations[0].message
+        for i, call in enumerate(answer.tool_calls):
+            chunk = {"name": call["name"], "args": json.dumps(call["args"]), "id": call["id"], "index": i}
+            yield ChatGenerationChunk(message=AIMessageChunk(content="", tool_call_chunks=[chunk]))
+        words = str(answer.content).split(" ") if answer.content else []
+        for i, word in enumerate(words):
+            yield ChatGenerationChunk(message=AIMessageChunk(content=word + (" " if i < len(words) - 1 else "")))

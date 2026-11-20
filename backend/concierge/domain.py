@@ -11,27 +11,42 @@ from typing import Literal, Protocol
 
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator, model_validator
 
-REGION = "Marlow Bay"  # a fictional region
-NEIGHBOURHOODS = ["Harbourside", "Old Mill", "Kestrel Heights", "Lantern Quay", "Fernwick"]
-NEARBY = {  # discovery for a neighbourhood includes the ones next to it
-    "Harbourside": {"Lantern Quay", "Old Mill"},
-    "Old Mill": {"Harbourside", "Fernwick"},
-    "Kestrel Heights": {"Fernwick"},
-    "Lantern Quay": {"Harbourside"},
-    "Fernwick": {"Old Mill", "Kestrel Heights"},
+REGION = "Munich"  # providers are fictional; the city and its neighbourhoods are real
+NEIGHBOURHOODS = ["Schwabing", "Maxvorstadt", "Haidhausen", "Sendling", "Giesing", "Neuhausen"]
+NEARBY = {  # a search for a neighbourhood also includes the ones next to it
+    "Schwabing": {"Maxvorstadt", "Neuhausen"},
+    "Maxvorstadt": {"Schwabing", "Haidhausen", "Sendling"},
+    "Haidhausen": {"Maxvorstadt", "Giesing"},
+    "Sendling": {"Maxvorstadt", "Giesing"},
+    "Giesing": {"Haidhausen", "Sendling"},
+    "Neuhausen": {"Schwabing"},
 }
 
 
 class SearchRequest(BaseModel):
-    """What the intake agent must produce. Required fields have no defaults, so an incomplete request cannot be built."""
+    """What the chat agent extracts from the conversation, and the input of the research job. Pydantic checks it, so an
+    incomplete or invalid request is refused with a message the chat agent can read and ask the user about."""
 
-    service_category: Literal["physiotherapy"]
-    location: str  # REGION or one of NEIGHBOURHOODS
+    location: str  # REGION, or one of NEIGHBOURHOODS
     date_from: date
     date_to: date
-    preferences: list[str] = []
+    preferences: list[str] = []  # short phrases: 'back pain', 'evening', 'home visit'
+    service_category: Literal["physiotherapy"] = "physiotherapy"
+
+    @field_validator("location")
+    @classmethod
+    def _known_location(cls, value: str) -> str:
+        if value != REGION and value not in NEIGHBOURHOODS:
+            raise ValueError(f"location must be {REGION!r} or one of {NEIGHBOURHOODS}")
+        return value
+
+    @model_validator(mode="after")
+    def _window_is_ordered(self) -> "SearchRequest":
+        if self.date_to < self.date_from:
+            raise ValueError("date_to must not be before date_from")
+        return self
 
 
 class Provider(BaseModel):
@@ -127,36 +142,30 @@ class PgAvailability:
 
 
 class Repository:
-    """Requests, research results, progress and bookings."""
+    """Requests, results, progress, bookings and demo settings. Everything about one research is keyed by its job id."""
 
     def __init__(self, db: Database):
         self.db = db
 
-    async def create_request(self, criteria: SearchRequest) -> str:
-        request_id = f"req-{uuid.uuid4().hex[:8]}"
+    async def save_request(self, job_id: str, request: SearchRequest) -> None:  # an upsert: a job may run twice
         async with self.db.pool.connection() as conn:
             await conn.execute(
-                "INSERT INTO app.appointment_requests (id, criteria) VALUES (%s, %s)",
-                (request_id, criteria.model_dump_json()),
+                "INSERT INTO app.appointment_requests (job_id, criteria) VALUES (%s, %s) "
+                "ON CONFLICT (job_id) DO UPDATE SET criteria = excluded.criteria",
+                (job_id, request.model_dump_json()),
             )
-        return request_id
 
-    async def attach_job(self, request_id: str, job_id: str) -> None:
+    async def get_request(self, job_id: str) -> dict | None:
         async with self.db.pool.connection() as conn:
-            await conn.execute("UPDATE app.appointment_requests SET job_id = %s WHERE id = %s", (job_id, request_id))
+            row = await (await conn.execute("SELECT criteria FROM app.appointment_requests WHERE job_id = %s", (job_id,))).fetchone()
+        return row["criteria"] if row else None
 
-    async def request_for_job(self, job_id: str) -> dict | None:
-        async with self.db.pool.connection() as conn:
-            return await (
-                await conn.execute("SELECT id, job_id, criteria FROM app.appointment_requests WHERE job_id = %s", (job_id,))
-            ).fetchone()
-
-    async def save_result(self, job_id: str, request_id: str, result: dict) -> None:  # safe to run twice
+    async def save_result(self, job_id: str, result: dict) -> None:  # an upsert, for the same reason
         async with self.db.pool.connection() as conn:
             await conn.execute(
-                "INSERT INTO app.research_results (job_id, request_id, result) VALUES (%s, %s, %s) "
+                "INSERT INTO app.research_results (job_id, result) VALUES (%s, %s) "
                 "ON CONFLICT (job_id) DO UPDATE SET result = excluded.result",
-                (job_id, request_id, json.dumps(result)),
+                (job_id, json.dumps(result)),
             )
 
     async def get_result(self, job_id: str) -> dict | None:
@@ -172,36 +181,31 @@ class Repository:
         async with self.db.pool.connection() as conn:
             return await (
                 await conn.execute(
-                    "SELECT seq, message, created_at FROM app.research_progress WHERE job_id = %s AND seq > %s ORDER BY seq",
-                    (job_id, after),
+                    "SELECT seq, message FROM app.research_progress WHERE job_id = %s AND seq > %s ORDER BY seq", (job_id, after)
                 )
             ).fetchall()
 
-    async def book(self, *, idempotency_key: str, request_id: str, job_id: str, provider_id: str, slot_id: str) -> tuple[dict, bool]:
+    async def book(self, *, idempotency_key: str, job_id: str, provider_id: str, slot_id: str) -> tuple[dict, bool]:
         """Create the booking, or return the one made with the same key. Returns (booking, created).
         Raises `SlotTaken` when the slot is not open. A deterministic application operation, never an agent decision."""
-        async with self.db.pool.connection() as conn, conn.transaction():
+        async with self.db.pool.connection() as conn, conn.transaction():  # one transaction: the slot and the booking agree
             existing = await (
                 await conn.execute("SELECT * FROM app.bookings WHERE idempotency_key = %s", (idempotency_key,))
             ).fetchone()
-            if existing:
+            if existing:  # the same confirmation sent again: no second booking
                 return existing, False
             slot = await (
-                await conn.execute(
-                    "SELECT status, provider_id FROM app.availability_slots WHERE id = %s FOR UPDATE", (slot_id,)
-                )
-            ).fetchone()
+                await conn.execute("SELECT status, provider_id FROM app.availability_slots WHERE id = %s FOR UPDATE", (slot_id,))
+            ).fetchone()  # FOR UPDATE: two confirmations of one slot cannot both pass the check below
             if slot is None or slot["provider_id"] != provider_id:
                 raise SlotTaken("no such slot for that provider")
             if slot["status"] != "open":
                 raise SlotTaken("that slot has just been taken")
             await conn.execute("UPDATE app.availability_slots SET status = 'booked' WHERE id = %s", (slot_id,))
-            booking_id = f"bk-{uuid.uuid4().hex[:8]}"
             booking = await (
                 await conn.execute(
-                    "INSERT INTO app.bookings (id, idempotency_key, request_id, job_id, provider_id, slot_id) "
-                    "VALUES (%s, %s, %s, %s, %s, %s) RETURNING *",
-                    (booking_id, idempotency_key, request_id, job_id, provider_id, slot_id),
+                    "INSERT INTO app.bookings (id, idempotency_key, job_id, provider_id, slot_id) VALUES (%s, %s, %s, %s, %s) RETURNING *",
+                    (f"bk-{uuid.uuid4().hex[:8]}", idempotency_key, job_id, provider_id, slot_id),
                 )
             ).fetchone()
         return booking, True
@@ -213,6 +217,18 @@ class Repository:
     async def booking_for_job(self, job_id: str) -> dict | None:
         async with self.db.pool.connection() as conn:
             return await (await conn.execute("SELECT * FROM app.bookings WHERE job_id = %s", (job_id,))).fetchone()
+
+    async def set_outage(self, enabled: bool) -> None:
+        async with self.db.pool.connection() as conn:
+            await conn.execute(
+                "INSERT INTO app.demo_settings (key, value) VALUES ('outage', %s) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                ("1" if enabled else "0",),
+            )
+
+    async def outage(self) -> bool:
+        async with self.db.pool.connection() as conn:
+            row = await (await conn.execute("SELECT value FROM app.demo_settings WHERE key = 'outage'")).fetchone()
+        return bool(row and row["value"] == "1")
 
 
 class SlotTaken(Exception):

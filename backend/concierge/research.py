@@ -8,31 +8,16 @@ from datetime import date
 
 from pydantic import BaseModel
 
+from concierge import deps
 from concierge.agents import (
-    AvailabilityDeps,
     Candidate,
     EvalInput,
     Evaluator,
     ProviderResearcher,
     ResearchInput,
-    outage_flag,
 )
-from concierge.domain import AvailabilityService, Provider, ProviderCatalog, Repository, SearchRequest, Slot
+from concierge.domain import Provider, SearchRequest, Slot
 from featherweight import JobContext, RunStatus, job
-
-
-class Deps:
-    """The application services the job uses, set once at startup by the worker (or a test)."""
-
-    catalog: ProviderCatalog
-    availability: AvailabilityService
-    repo: Repository
-
-
-class ResearchJobInput(BaseModel):
-    request_id: str
-    request: SearchRequest
-    simulate_outage: bool = False  # demo: availability lookups fail for two fixed providers
 
 
 class ShortlistItem(BaseModel):
@@ -50,7 +35,6 @@ class ResearchResult(BaseModel):
     shortlist: list[ShortlistItem]
     summary: str  # model-generated
     considered: int
-    reused: int  # provider checks reused from an earlier attempt (a resumed job)
 
 
 class ResearchFailed(RuntimeError):
@@ -62,28 +46,28 @@ def _window(request: SearchRequest) -> tuple[date, date]:
 
 
 @job(timeout=180)
-async def research_providers(ctx: JobContext, input: ResearchJobInput) -> ResearchResult:
-    repo, request = Deps.repo, input.request
-    note = lambda text: repo.add_progress(ctx.job_id, text)  # noqa: E731
+async def research_providers(ctx: JobContext, input: SearchRequest) -> ResearchResult:
+    """Research the physiotherapy providers that fit a search request: check each one's availability and shortlist the best."""
+    repo, request = deps.repo, input  # the input IS the typed search request
+    note = lambda text: repo.add_progress(ctx.job_id, text)  # noqa: E731  (the progress lines the UI shows)
 
+    await repo.save_request(ctx.job_id, request)  # first: the app can show the request while the job runs
     await note("Searching the provider catalogue")
-    providers = await Deps.catalog.discover(request)
+    # Step 1: discovery is plain code over the catalogue service; no agent is needed to filter a list.
+    providers = await deps.catalog.discover(request)
     await note(f"Found {len(providers)} candidate providers. Researching them in parallel")
 
-    AvailabilityDeps.service = Deps.availability
-    outage_flag.set(input.simulate_outage)
+    # Step 2: one researcher agent per provider, all at once. Their runs and traces belong to this job.
     results = await ctx.run_many(ProviderResearcher, [ResearchInput(request=request, provider=p) for p in providers])
 
     failed = [p for p, r in zip(providers, results) if r.status != RunStatus.SUCCESS]
-    reused = sum(1 for r in results if r.reused)
     for p in failed:
         await note(f"Availability lookup failed for {p.name}")
-    if reused:
-        await note(f"Reused {reused} provider checks from the earlier attempt")
-    if failed:  # the other providers' runs are kept: a resume reruns only these
+    if failed:  # the job fails visibly, and says which providers
         raise ResearchFailed(f"availability lookup failed for {', '.join(p.name for p in failed)}")
     await note("All providers checked. Evaluating")
 
+    # Step 3: one evaluator agent compares what the researchers found and ranks the providers.
     candidates = [
         Candidate(
             provider_id=p.id, name=p.name, price_band=p.price_band, fit=r.output.fit, matched=r.output.matched,
@@ -96,11 +80,13 @@ async def research_providers(ctx: JobContext, input: ResearchJobInput) -> Resear
         raise ResearchFailed("the evaluation did not produce a valid shortlist")
     out = evaluation.output
 
+    # Step 4: the model only chose ids. The result is built from the catalogue and the availability service, so the
+    # provider and slot data is verified, and only `reasons` and `summary` are model-written.
     by_id = {c.provider_id: c for c in candidates}
     shortlist: list[ShortlistItem] = []
     for pid in out.ranked_provider_ids:  # hydrate from application data: the model only chose ids
-        provider = await Deps.catalog.get(pid)
-        open_slots = await Deps.availability.slots(pid, *_window(request))
+        provider = await deps.catalog.get(pid)
+        open_slots = await deps.availability.slots(pid, *_window(request))
         offered = [s for s in open_slots if s.id in out.slot_ids]
         if provider and offered:
             c = by_id[pid]
@@ -112,7 +98,7 @@ async def research_providers(ctx: JobContext, input: ResearchJobInput) -> Resear
                 )
             )
     summary = out.summary if shortlist else "No suitable provider was found for this request."
-    result = ResearchResult(request=request, shortlist=shortlist, summary=summary, considered=len(providers), reused=reused)
-    await repo.save_result(ctx.job_id, input.request_id, result.model_dump(mode="json"))
+    result = ResearchResult(request=request, shortlist=shortlist, summary=summary, considered=len(providers))
+    await repo.save_result(ctx.job_id, result.model_dump(mode="json"))  # an upsert: a job must be safe to run twice
     await note(f"Done: {len(shortlist)} providers shortlisted")
     return result

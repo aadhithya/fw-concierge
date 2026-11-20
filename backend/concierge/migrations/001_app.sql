@@ -1,5 +1,5 @@
--- Application-owned domain data. Featherweight's run log lives in its own schema (`featherweight`), the queue and result
--- store in `fw_adapters`: nothing here is shared with them.
+-- Application-owned data: the domain (providers, slots, requests, bookings) and the job results.
+-- Featherweight's run log lives in its own schema (`featherweight`) and the queue in `fw_adapters`.
 CREATE SCHEMA IF NOT EXISTS app;
 
 CREATE TABLE app.providers (
@@ -25,18 +25,28 @@ CREATE TABLE app.availability_slots (
 );
 CREATE INDEX ON app.availability_slots (provider_id, starts_at);
 
+-- Everything about one research is keyed by the id of its Featherweight job. The job itself writes the request row first.
 CREATE TABLE app.appointment_requests (
-    id         text PRIMARY KEY,
-    job_id     text UNIQUE,                 -- the Featherweight job that researches it (set after submit)
-    criteria   jsonb NOT NULL,              -- the typed SearchRequest
+    job_id     text PRIMARY KEY,
+    criteria   jsonb NOT NULL,              -- the typed SearchRequest the chat agent extracted
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE app.research_results (
-    job_id     text PRIMARY KEY,
-    request_id text NOT NULL REFERENCES app.appointment_requests(id),
-    result     jsonb NOT NULL,              -- the shortlist: verified data and model explanations kept apart
+    job_id     text PRIMARY KEY REFERENCES app.appointment_requests(job_id),
+    result     jsonb NOT NULL,              -- the shortlist: verified data and model-written reasons kept apart
     created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Outputs of jobs and agents, behind Featherweight's `ResultStore`. This is application data (it holds user content, and
+-- in a multi-tenant app it would be tenant-scoped), so it lives here, under the app's own retention and access rules.
+CREATE TABLE app.job_results (
+    job_id     text NOT NULL,
+    agent_hash text NOT NULL,
+    input_hash text NOT NULL,
+    output     jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (job_id, agent_hash, input_hash)
 );
 
 CREATE TABLE app.research_progress (
@@ -50,9 +60,14 @@ CREATE INDEX ON app.research_progress (job_id, seq);
 CREATE TABLE app.bookings (
     id              text PRIMARY KEY,
     idempotency_key text NOT NULL UNIQUE,   -- a repeated confirmation returns the same booking
-    request_id      text NOT NULL REFERENCES app.appointment_requests(id),
-    job_id          text NOT NULL,
+    job_id          text NOT NULL REFERENCES app.appointment_requests(job_id),
     provider_id     text NOT NULL REFERENCES app.providers(id),
     slot_id         text NOT NULL UNIQUE REFERENCES app.availability_slots(id),  -- a slot is booked once
     created_at      timestamptz NOT NULL DEFAULT now()
+);
+
+-- Demo switches, such as "simulate a provider outage". Read by the worker at the moment it looks availability up.
+CREATE TABLE app.demo_settings (
+    key   text PRIMARY KEY,
+    value text NOT NULL
 );

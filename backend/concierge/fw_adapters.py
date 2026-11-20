@@ -113,7 +113,7 @@ class PostgresQueue(JobQueue):
 
 
 class PostgresResultStore(ResultStore):
-    """Job and agent outputs kept for resuming a failed job. Your data, your table."""
+    """Job and agent outputs, behind Featherweight's `ResultStore`. Application data: the table is `app.job_results`."""
 
     def __init__(self, pool: AsyncConnectionPool):
         self.pool = pool
@@ -121,7 +121,7 @@ class PostgresResultStore(ResultStore):
     async def put(self, key: ResultKey, output: dict) -> None:
         async with self.pool.connection() as conn:
             await conn.execute(
-                "INSERT INTO fw_adapters.results (job_id, agent_hash, input_hash, output) VALUES (%s, %s, %s, %s) "
+                "INSERT INTO app.job_results (job_id, agent_hash, input_hash, output) VALUES (%s, %s, %s, %s) "
                 "ON CONFLICT (job_id, agent_hash, input_hash) DO UPDATE SET output = excluded.output, created_at = now()",
                 (key.job_id, key.agent_hash, key.input_hash, Jsonb(output)),
             )
@@ -130,7 +130,7 @@ class PostgresResultStore(ResultStore):
         async with self.pool.connection() as conn:
             row = await (
                 await conn.execute(
-                    "SELECT output FROM fw_adapters.results WHERE job_id = %s AND agent_hash = %s AND input_hash = %s",
+                    "SELECT output FROM app.job_results WHERE job_id = %s AND agent_hash = %s AND input_hash = %s",
                     (key.job_id, key.agent_hash, key.input_hash),
                 )
             ).fetchone()
@@ -138,4 +138,4 @@ class PostgresResultStore(ResultStore):
 
     async def delete_job(self, job_id: str) -> None:
         async with self.pool.connection() as conn:
-            await conn.execute("DELETE FROM fw_adapters.results WHERE job_id = %s", (job_id,))
+            await conn.execute("DELETE FROM app.job_results WHERE job_id = %s", (job_id,))

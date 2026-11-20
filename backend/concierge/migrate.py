@@ -13,8 +13,8 @@ log = logging.getLogger("migrate")
 MIGRATIONS = Path(__file__).parent / "migrations"
 
 
-async def main() -> None:
-    async with await psycopg.AsyncConnection.connect(DATABASE_URL, autocommit=True) as conn:
+async def migrate(dsn: str) -> None:
+    async with await psycopg.AsyncConnection.connect(dsn, autocommit=True) as conn:
         await conn.execute("SELECT pg_advisory_lock(727)")
         await conn.execute("CREATE TABLE IF NOT EXISTS public.schema_migrations (name text PRIMARY KEY)")
         done = {r[0] for r in await (await conn.execute("SELECT name FROM public.schema_migrations")).fetchall()}
@@ -30,4 +30,4 @@ async def main() -> None:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(main())
+    asyncio.run(migrate(DATABASE_URL))

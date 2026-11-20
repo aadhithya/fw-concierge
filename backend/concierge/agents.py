@@ -1,85 +1,30 @@
-"""The three typed agents of the pipeline. They propose; the validators and `check_output` have the last word."""
+"""The two typed agents of the research pipeline. They propose; the validators and `check_output` have the last word.
+(The chat agent that talks to the user is in chat.py.)"""
 
-import contextvars
-import json
 from datetime import date
 from typing import ClassVar, Literal
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
-from concierge.domain import NEIGHBOURHOODS, REGION, AvailabilityService, Provider, ProviderLookupError, SearchRequest
+from concierge import deps
+from concierge.domain import Provider, ProviderLookupError, SearchRequest
 from concierge.models import model_for
 from featherweight import AgentBase, AgentInput, AgentOutput, ModelSettings
 
-# ---------------------------------------------------------------------------------------------------------------- intake
-
-
-class IntakeInput(AgentInput):
-    conversation: str  # the user's request, and any earlier question and answer
-    today: date
-
-
-class IntakeOutput(AgentOutput):  # also carries `open_questions`
-    service_category: Literal["physiotherapy"] | None = None
-    location: str | None = None
-    date_from: date | None = None
-    date_to: date | None = None
-    preferences: list[str] = []
-
-    def to_request(self) -> SearchRequest:
-        return SearchRequest.model_validate(self.model_dump(exclude={"open_questions"}))
-
-
-class IntakeAgent(AgentBase):
-    name: str = "intake"
-    description: str = "Turns a natural-language appointment request into a typed search request"
-    version: str = "1"
-    prompt: str = (
-        f"You book physiotherapy appointments in {REGION}, a fictional region with these neighbourhoods: "
-        f"{', '.join(NEIGHBOURHOODS)}. From the conversation, extract the service category (physiotherapy only), the "
-        f"location (a neighbourhood or '{REGION}' for anywhere), the date window (date_from and date_to, using `today` to "
-        "resolve words such as 'next week') and preferences (short phrases such as 'back pain', 'evening', 'home visit'). "
-        "NEVER invent a missing value. If the location or the date window is missing or unclear, leave it empty and ask one "
-        "short, focused question in open_questions."
-    )
-    model: ModelSettings = Field(default_factory=lambda: model_for("intake"))
-    input_model: ClassVar[type[AgentInput]] = IntakeInput
-    output_model: ClassVar[type[AgentOutput]] = IntakeOutput
-    allow_user_questions: bool = True
-
-    def check_output(self, agent_input, output: IntakeOutput):
-        if output.open_questions:
-            return  # asking is a valid answer
-        missing = [f for f in ("service_category", "location", "date_from", "date_to") if getattr(output, f) is None]
-        if missing:
-            raise ValueError(f"missing {missing}: ask a question in open_questions instead of leaving them empty")
-        if output.location != REGION and output.location not in NEIGHBOURHOODS:
-            raise ValueError(f"location must be {REGION!r} or one of {NEIGHBOURHOODS}")
-        if output.date_to < output.date_from or output.date_from < agent_input.today:
-            raise ValueError("the date window must start today or later and end after it starts")
-
-
 # ------------------------------------------------------------------------------------------------------------ researcher
 
-# A demo failure: with the outage flag on, these providers' availability lookups fail.
-OUTAGE_PROVIDERS = {"p02", "p06"}
-outage_flag: contextvars.ContextVar[bool] = contextvars.ContextVar("outage_flag", default=False)
-
-
-class AvailabilityDeps:
-    """Set once per process (worker); the tool reaches availability only through the service interface."""
-
-    service: AvailabilityService | None = None
+# Demo failure: while the "simulate outage" switch is on (see the UI), availability lookups for these providers fail.
+OUTAGE_PROVIDERS = {"p01", "p07"}
 
 
 @tool
 async def check_availability(provider_id: str, date_from: str, date_to: str) -> str:
     """List a provider's open appointment slots between two ISO dates (YYYY-MM-DD). One line per slot: '<slot_id> | <start>'."""
-    if outage_flag.get() and provider_id in OUTAGE_PROVIDERS:
+    # The agent reaches availability only through the AvailabilityService interface, never the database directly.
+    if provider_id in OUTAGE_PROVIDERS and await deps.repo.outage():
         raise ProviderLookupError(f"availability service unavailable for {provider_id}")
-    assert AvailabilityDeps.service is not None, "availability service not configured"
-    slots = await AvailabilityDeps.service.slots(provider_id, date.fromisoformat(date_from), date.fromisoformat(date_to))
+    slots = await deps.availability.slots(provider_id, date.fromisoformat(date_from), date.fromisoformat(date_to))
     return "\n".join(f"{s.id} | {s.starts_at:%Y-%m-%d %H:%M}" for s in slots) or "no open slots"
 
 
@@ -113,7 +58,8 @@ class ProviderResearcher(AgentBase):
     output_model: ClassVar[type[AgentOutput]] = Findings
 
     def check_output(self, agent_input, output: Findings):
-        if not output.availability_checked:  # the run fails, the job sees it, and a resume reruns only this provider
+        # A failed lookup must FAIL this run (not succeed with an empty answer), so the job can see which providers failed.
+        if not output.availability_checked:
             raise ValueError("availability could not be checked")
 
 
@@ -157,6 +103,7 @@ class Evaluator(AgentBase):
     output_model: ClassVar[type[AgentOutput]] = Evaluation
 
     def check_output(self, agent_input: EvalInput, output: Evaluation):
+        # The model only proposes: every id it returns must exist in the input, and every pick needs a reason and a slot.
         known = {c.provider_id: c for c in agent_input.candidates}
         if len(output.ranked_provider_ids) > 3 or any(p not in known for p in output.ranked_provider_ids):
             raise ValueError("ranked_provider_ids must be at most 3 ids from the candidates")
@@ -172,10 +119,3 @@ class Evaluator(AgentBase):
             raise ValueError("slot_ids must come from the ranked providers' candidate slots")
         if any(r.split(":")[0] not in output.ranked_provider_ids for r in output.reasons):
             raise ValueError("a reason names a provider that is not ranked")
-
-
-def parse_slot_lines(text: str) -> list[str]:
-    return [line.split("|")[0].strip() for line in text.splitlines() if "|" in line]
-
-
-__all__ = ["IntakeAgent", "ProviderResearcher", "Evaluator", "json"]
