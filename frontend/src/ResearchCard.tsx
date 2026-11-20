@@ -3,6 +3,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { getJob, retryJob, when, type Booking, type Job } from './api'
+import { useControls } from './controls'
 import { useSelection } from './selection'
 import { useWake } from './wake'
 
@@ -16,6 +17,7 @@ export function ResearchCard({ jobId: initialJobId, onJob, wake = false }: { job
   const [jobId, setJobId] = useState(initialJobId)
   const [job, setJob] = useState<Job | null>(null)
   const { selection, select } = useSelection()
+  const { controls } = useControls()
   const [error, setError] = useState<string | null>(null)
 
   useWake(jobId, job?.wake ?? null, wake) // tells the chat how this research ended (live conversation only)
@@ -37,7 +39,7 @@ export function ResearchCard({ jobId: initialJobId, onJob, wake = false }: { job
   if (!job) return <Card className="my-3"><CardContent className="pt-4 text-muted-foreground">Loading research…</CardContent></Card>
 
   const confirmed = job.booking // a booking made earlier (this also restores it after a refresh)
-  const retry = async () => { setJobId((await retryJob(jobId)).job_id); setJob(null) }
+  const retry = async () => { setJobId((await retryJob(jobId, controls.sleepSeconds)).job_id); setJob(null) }
   return (
     <Card className="my-3 w-full">
       <CardHeader className="flex-row items-center justify-between gap-2">
@@ -60,6 +62,8 @@ export function ResearchCard({ jobId: initialJobId, onJob, wake = false }: { job
           {job.progress.map((p) => <li key={p.seq}>· {p.message}</li>)}
         </ul>
 
+        {(job.state === 'queued' || job.state === 'running') && <div className="text-xs text-muted-foreground">The research agent is waiting for the provider service…</div>}
+
         {job.state === 'failed' && (
           <div className="space-y-2 rounded-md border border-red-500/40 p-3">
             <div className="text-red-400">The research failed ({job.error}). See the progress lines above.</div>
@@ -79,7 +83,7 @@ export function ResearchCard({ jobId: initialJobId, onJob, wake = false }: { job
                   <div className="text-xs text-muted-foreground">{item.provider.neighbourhood} · {'€'.repeat(item.provider.price_band)}</div>
                 </div>
                 <div className="text-xs text-muted-foreground">{item.provider.description}</div>
-                <div className="text-xs"><span className="text-muted-foreground">Why (model-written): </span>{item.reasons.join(' ')}</div>
+                <div className="text-xs"><span className="text-muted-foreground">Why: </span>{item.reasons.join(' ')}</div>
                 <div className="flex flex-wrap gap-2">
                   {item.slots.map((slot) => (
                     <Button key={slot.id} size="sm" variant={selection?.slot.id === slot.id ? 'default' : 'outline'}
