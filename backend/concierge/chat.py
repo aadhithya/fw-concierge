@@ -15,7 +15,7 @@ from pydantic import Field
 
 from concierge.domain import NEIGHBOURHOODS, REGION
 from concierge.models import model_for
-from concierge.research import research_providers
+from concierge.research import Researcher
 from featherweight import ModelSettings, StreamingAgent
 
 
@@ -44,4 +44,4 @@ class Concierge(StreamingAgent):
     )
     model: ModelSettings = Field(default_factory=lambda: model_for("chat"))
     tools: list = [current_date]
-    background_agents: list[type] = [research_providers]  # a job class: run by a worker, found by name
+    background_agents: list[type] = [Researcher]  # an agent class: started in the background, run by a worker

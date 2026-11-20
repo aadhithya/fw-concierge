@@ -1,7 +1,7 @@
 """The "prepare booking" job: a second, resumable job, started by the user from a button.
 
 Two agents run one after the other: the first works out how the chosen provider and slot fit the request, the second
-turns that into the confirmation text shown before the user confirms. If the demo outage switch is on, the job fails AFTER
+turns that into the confirmation text shown before the user confirms. If the demo failure parameter is on, the job fails AFTER
 the first agent. Retrying it is a *resume* (`resume_from`): the first agent's run is reused (no model call, zero tokens) and
 only the second agent runs again. Booking itself is not here: it stays a plain application operation after an explicit confirm.
 """
@@ -20,6 +20,7 @@ class PrepareInput(BaseModel):
     research_job_id: str  # the research whose request and shortlist this belongs to
     provider_id: str
     slot_id: str
+    simulate_failure: bool = False  # demo: fail after the first agent, so the retry can be shown as a resume
 
 
 # ---------------------------------------------------------------------------------------------------------- agent 1: briefer
@@ -119,8 +120,8 @@ async def prepare_booking(ctx: JobContext, input: PrepareInput) -> Preparation:
     # `reused` is true when this is a resumed job and this step had already succeeded: nothing was run again.
     await note("Briefing reused from the earlier attempt" if briefing.reused else "Briefing ready")
 
-    # Demo switch: fail here, AFTER the first agent. A resumed job reuses the briefing and continues from this point.
-    if await repo.outage():
+    # Demo parameter: fail here, AFTER the first agent. A resumed job reuses the briefing and continues from this point.
+    if input.simulate_failure:
         raise PreparationFailed("the confirmation service is unavailable")
 
     await note("Writing the confirmation")

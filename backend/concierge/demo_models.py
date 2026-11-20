@@ -12,7 +12,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
-from concierge.domain import NEIGHBOURHOODS, REGION
+from concierge.domain import NEIGHBOURHOODS, REGION, Provider, match_preferences
 
 PREFERENCE_WORDS = {  # words in a request -> a preference phrase the providers can match
     "back": "back pain", "neck": "neck pain", "knee": "knee", "shoulder": "shoulder", "sciatica": "sciatica",
@@ -21,9 +21,6 @@ PREFERENCE_WORDS = {  # words in a request -> a preference phrase the providers 
     "evening": "evening", "after work": "evening", "weekend": "weekend", "home visit": "home visit", "at home": "home visit",
     "wheelchair": "accessible", "accessible": "accessible",
 }
-ATTRIBUTE_PREFS = {"evening": "evenings", "weekend": "weekends", "home visit": "home_visits", "accessible": "accessible"}
-
-
 def _window(text: str, today: date) -> tuple[date, date] | None:
     if m := re.search(r"\b(\d{4}-\d{2}-\d{2})\b", text):
         d = date.fromisoformat(m.group(1))
@@ -108,39 +105,15 @@ def chat(messages) -> AIMessage:
     args, questions = intake(text, date.today())
     if questions:
         return AIMessage(content=questions[0])  # one focused question at a time
-    call = {"agent_name": "research_providers", "input_json": json.dumps(args)}
+    call = {"agent_name": "researcher", "input_json": json.dumps(args)}
     return AIMessage(content="", tool_calls=[{"name": "start_background", "args": call, "id": "demo-start"}])
 
 
-def research(inp: dict, tool_text: str | None, tool_failed: bool) -> dict | tuple[str, dict]:
-    req, prov = inp["request"], inp["provider"]
-    if tool_text is None:
-        return "check_availability", {"provider_id": prov["id"], "date_from": req["date_from"], "date_to": req["date_to"]}
-    if tool_failed:
-        return {"availability_checked": False, "concerns": ["availability lookup failed"]}
-    slot_ids = [line.split("|")[0].strip() for line in tool_text.splitlines() if "|" in line]
-    matched, concerns = [], []
-    for pref in req["preferences"]:
-        attr = ATTRIBUTE_PREFS.get(pref)
-        ok = bool(prov[attr]) if attr else any(pref in t or t in pref for t in prov["tags"])
-        (matched if ok else concerns).append(
-            {"evening": "evening appointments", "weekend": "weekend appointments", "home visit": "home visits",
-             "accessible": "step-free access"}.get(pref, f"treats {pref}") if ok else pref
-        )
-    fit = "weak" if not slot_ids or (req["preferences"] and not matched) else ("strong" if not concerns else "partial")
-    return {"fit": fit, "matched": matched, "concerns": concerns, "slot_ids": slot_ids[:6], "availability_checked": True}
-
-
 def brief(inp: dict) -> dict:
-    """Demo briefer: compares the request's preferences with the provider's known attributes."""
-    prov, prefs = inp["provider"], inp["request"]["preferences"]
-    matches, concerns = [], []
-    for pref in prefs:
-        attr = ATTRIBUTE_PREFS.get(pref)
-        ok = bool(prov[attr]) if attr else any(pref in t or t in pref for t in prov["tags"])
-        (matches if ok else concerns).append(pref if not ok else f"meets '{pref}'")
+    """Demo briefer: compares the request's preferences with the provider's known attributes (the shared matching)."""
+    matched, concerns = match_preferences(Provider(**inp["provider"]), inp["request"]["preferences"])
     return {
-        "matches": matches or ["has an open slot in your window"],
+        "matches": matched or ["has an open slot in your window"],
         "concerns": [f"does not list '{c}'" for c in concerns],
         "before_you_go": ["Arrive ten minutes early", "Bring any earlier scans or referral letters"],
     }
@@ -154,24 +127,11 @@ def write_confirmation(inp: dict) -> dict:
     return {"text": f"{prov['name']} in {prov['neighbourhood']}, {when} ({slot['duration_min']} minutes): {note}. This is a simulated booking; nothing real is reserved."}
 
 
-def evaluate(inp: dict) -> dict:
-    rank = {"strong": 2, "partial": 1, "weak": 0}
-    usable = [c for c in inp["candidates"] if c["fit"] != "weak" and c["slot_ids"]]
-    usable.sort(key=lambda c: (-rank[c["fit"]], -len(c["matched"]), c["price_band"], c["provider_id"]))
-    top = usable[:3]
-    if not top:
-        return {"summary": "No provider matches this request with open slots. Try a wider area or a different week."}
-    reasons, slots = [], []
-    for c in top:
-        bits = c["matched"] or ["has open slots in your window"]
-        reasons.append(f"{c['provider_id']}: {'; '.join(bits)}; price band {c['price_band']} of 3")
-        slots += c["slot_ids"][:3]
-    return {
-        "ranked_provider_ids": [c["provider_id"] for c in top],
-        "reasons": reasons,
-        "slot_ids": slots,
-        "summary": f"Shortlisted {len(top)} of {len(inp['candidates'])} providers researched.",
-    }
+def _text(content) -> str:
+    """The text of a tool result. An MCP tool returns a list of content blocks, not a string."""
+    if isinstance(content, list):
+        return "\n".join(block.get("text", "") if isinstance(block, dict) else str(block) for block in content)
+    return str(content)
 
 
 class RuleModel(BaseChatModel):
@@ -190,16 +150,24 @@ class RuleModel(BaseChatModel):
         if self.role == "chat":
             return ChatResult(generations=[ChatGeneration(message=chat(messages))])
         inp = json.loads(str(next(m for m in messages if m.type == "human").content))  # the agent's input, as JSON
-        if self.role == "evaluator":
-            name, args = "Evaluation", evaluate(inp)
+        if self.role == "researcher":
+            tool_msg = next((m for m in reversed(messages) if m.type == "tool"), None)
+            if tool_msg is None:  # call the one tool, as the prompt says
+                name, args = "providers_search_providers", {
+                    "location": inp["location"], "date_from": inp["date_from"], "date_to": inp["date_to"],
+                    "preferences": inp["preferences"], "sleep_seconds": inp["provider_sleep_seconds"],
+                }
+            else:  # forward what it returned
+                data = json.loads(_text(tool_msg.content))
+                found = data["providers"]
+                summary = f"Found {len(found)} of {data['considered']} providers with open slots." if found else "No provider matches this request."
+                name, args = "ResearchResult", {"shortlist": found, "considered": data["considered"], "summary": summary}
         elif self.role == "briefer":
             name, args = "Briefing", brief(inp)
         elif self.role == "writer":
             name, args = "Confirmation", write_confirmation(inp)
-        else:  # researcher: first call the tool, then answer from its result
-            tool_msg = next((m for m in reversed(messages) if m.type == "tool"), None)
-            result = research(inp, str(tool_msg.content) if tool_msg else None, bool(tool_msg and tool_msg.status == "error"))
-            name, args = result if isinstance(result, tuple) else ("Findings", result)
+        else:
+            raise ValueError(f"no demo model for role {self.role!r}")
         message = AIMessage(content="", tool_calls=[{"name": name, "args": args, "id": f"demo-{self.counter}"}])
         return ChatResult(generations=[ChatGeneration(message=message)])
 
