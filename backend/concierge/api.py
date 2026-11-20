@@ -20,6 +20,7 @@ from concierge.chat import Concierge
 from concierge.config import DATABASE_URL, STATIC_DIR
 from concierge.domain import Database, PgAvailability, PgCatalog, Repository, SearchRequest, SlotTaken
 from concierge.fw_adapters import PostgresQueue, PostgresResultStore
+from concierge.booking_prep import PrepareInput, prepare_booking
 from concierge.research import research_providers
 from concierge.telemetry import setup as setup_telemetry
 from featherweight import AgentRunner, BadRequest, JobClient, PostgresDatabase, RunStatus
@@ -98,9 +99,12 @@ def sse(event: str, data: dict, id: int | None = None) -> str:
 
 @app.get("/api/jobs/{job_id}/stream")
 async def job_stream(job_id: str, request: Request):
-    """Progress lines and state changes of ONE job, as server-sent events. A reconnecting browser resumes from Last-Event-ID."""
+    """Progress lines and state changes of ONE job (research or preparation), as server-sent events. A reconnecting browser resumes from Last-Event-ID."""
     after = int(request.headers.get("last-event-id", 0))
-    await job_view(job_id)  # 404 early
+    try:
+        await deps.client.status(job_id)  # 404 early
+    except Exception:
+        raise HTTPException(404, "No such job")
 
     async def events():
         nonlocal after
@@ -133,6 +137,50 @@ class OutageIn(BaseModel):
     enabled: bool
 
 
+# ------------------------------------------------------------------------------------------ prepare booking (resumable job)
+
+
+class PrepareIn(BaseModel):
+    job_id: str  # the research job whose shortlist the user picked from
+    provider_id: str
+    slot_id: str
+
+
+@app.post("/api/preparations")
+async def start_preparation(body: PrepareIn):
+    """The "Prepare booking" button: submit the two-agent job. `resumable=True` keeps its steps, so a failure can be resumed."""
+    if await deps.repo.get_request(body.job_id) is None:
+        raise HTTPException(404, "No such research")
+    prepare = PrepareInput(research_job_id=body.job_id, provider_id=body.provider_id, slot_id=body.slot_id)
+    return {"job_id": await deps.client.submit(prepare_booking, prepare, resumable=True)}
+
+
+@app.get("/api/preparations/{job_id}")
+async def get_preparation(job_id: str):
+    try:
+        row = await deps.client.status(job_id)
+    except Exception:
+        raise HTTPException(404, "No such job")
+    prep = await deps.repo.get_preparation(job_id)
+    return {
+        "job_id": job_id,
+        "state": STATES[row.status],
+        "error": row.error_type,
+        "result": prep["result"] if prep else None,
+        "progress": [{"seq": p["seq"], "message": p["message"]} for p in await deps.repo.progress(job_id)],
+    }
+
+
+@app.post("/api/preparations/{job_id}/retry")
+async def retry_preparation(job_id: str):
+    """Resume a failed preparation as a new job: the steps that succeeded (the first agent) are reused, the rest runs."""
+    prep = await deps.repo.get_preparation(job_id)
+    if prep is None or STATES[(await deps.client.status(job_id)).status] != "failed":
+        raise HTTPException(409, "Only a failed preparation can be retried")
+    again = PrepareInput(research_job_id=prep["research_job_id"], provider_id=prep["provider_id"], slot_id=prep["slot_id"])
+    return {"job_id": await deps.client.submit(prepare_booking, again, resumable=True, resume_from=job_id)}
+
+
 @app.get("/api/demo/outage")
 async def get_outage():
     return {"enabled": await deps.repo.outage()}
@@ -140,7 +188,7 @@ async def get_outage():
 
 @app.put("/api/demo/outage")
 async def set_outage(body: OutageIn):
-    """Demo switch: while on, the availability lookups of two providers fail, so a research job fails visibly."""
+    """Demo switch: while on, a booking preparation fails after its first agent, so it can be retried (resumed)."""
     await deps.repo.set_outage(body.enabled)
     return body
 

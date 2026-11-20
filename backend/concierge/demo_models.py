@@ -6,7 +6,7 @@ call named after the output class, or a call to the agent's own tool first. Noth
 
 import json
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk
@@ -107,6 +107,29 @@ def research(inp: dict, tool_text: str | None, tool_failed: bool) -> dict | tupl
     return {"fit": fit, "matched": matched, "concerns": concerns, "slot_ids": slot_ids[:6], "availability_checked": True}
 
 
+def brief(inp: dict) -> dict:
+    """Demo briefer: compares the request's preferences with the provider's known attributes."""
+    prov, prefs = inp["provider"], inp["request"]["preferences"]
+    matches, concerns = [], []
+    for pref in prefs:
+        attr = ATTRIBUTE_PREFS.get(pref)
+        ok = bool(prov[attr]) if attr else any(pref in t or t in pref for t in prov["tags"])
+        (matches if ok else concerns).append(pref if not ok else f"meets '{pref}'")
+    return {
+        "matches": matches or ["has an open slot in your window"],
+        "concerns": [f"does not list '{c}'" for c in concerns],
+        "before_you_go": ["Arrive ten minutes early", "Bring any earlier scans or referral letters"],
+    }
+
+
+def write_confirmation(inp: dict) -> dict:
+    """Demo writer: a confirmation sentence from the verified provider and slot."""
+    prov, slot, brief_ = inp["provider"], inp["slot"], inp["briefing"]
+    when = datetime.fromisoformat(slot["starts_at"]).strftime("%a %d %b at %H:%M")
+    note = brief_["matches"][0] if brief_["matches"] else "an open slot"
+    return {"text": f"{prov['name']} in {prov['neighbourhood']}, {when} ({slot['duration_min']} minutes): {note}. This is a simulated booking; nothing real is reserved."}
+
+
 def evaluate(inp: dict) -> dict:
     rank = {"strong": 2, "partial": 1, "weak": 0}
     usable = [c for c in inp["candidates"] if c["fit"] != "weak" and c["slot_ids"]]
@@ -145,6 +168,10 @@ class RuleModel(BaseChatModel):
         inp = json.loads(str(next(m for m in messages if m.type == "human").content))  # the agent's input, as JSON
         if self.role == "evaluator":
             name, args = "Evaluation", evaluate(inp)
+        elif self.role == "briefer":
+            name, args = "Briefing", brief(inp)
+        elif self.role == "writer":
+            name, args = "Confirmation", write_confirmation(inp)
         else:  # researcher: first call the tool, then answer from its result
             tool_msg = next((m for m in reversed(messages) if m.type == "tool"), None)
             result = research(inp, str(tool_msg.content) if tool_msg else None, bool(tool_msg and tool_msg.status == "error"))

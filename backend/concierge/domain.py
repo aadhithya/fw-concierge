@@ -71,10 +71,6 @@ class Slot(BaseModel):
     status: str
 
 
-class ProviderLookupError(RuntimeError):
-    """A provider's availability could not be fetched."""
-
-
 class ProviderCatalog(Protocol):
     async def discover(self, request: SearchRequest) -> list[Provider]: ...
     async def get(self, provider_id: str) -> Provider | None: ...
@@ -82,6 +78,7 @@ class ProviderCatalog(Protocol):
 
 class AvailabilityService(Protocol):
     async def slots(self, provider_id: str, date_from: date, date_to: date) -> list[Slot]: ...
+    async def get(self, slot_id: str) -> Slot | None: ...
 
 
 class Database:
@@ -142,7 +139,7 @@ class PgAvailability:
 
 
 class Repository:
-    """Requests, results, progress, bookings and demo settings. Everything about one research is keyed by its job id."""
+    """Requests, results, progress, preparations, bookings and demo settings. Everything is keyed by the id of its job."""
 
     def __init__(self, db: Database):
         self.db = db
@@ -175,13 +172,13 @@ class Repository:
 
     async def add_progress(self, job_id: str, message: str) -> None:
         async with self.db.pool.connection() as conn:
-            await conn.execute("INSERT INTO app.research_progress (job_id, message) VALUES (%s, %s)", (job_id, message))
+            await conn.execute("INSERT INTO app.job_progress (job_id, message) VALUES (%s, %s)", (job_id, message))
 
     async def progress(self, job_id: str, after: int = 0) -> list[dict]:
         async with self.db.pool.connection() as conn:
             return await (
                 await conn.execute(
-                    "SELECT seq, message FROM app.research_progress WHERE job_id = %s AND seq > %s ORDER BY seq", (job_id, after)
+                    "SELECT seq, message FROM app.job_progress WHERE job_id = %s AND seq > %s ORDER BY seq", (job_id, after)
                 )
             ).fetchall()
 
@@ -217,6 +214,22 @@ class Repository:
     async def booking_for_job(self, job_id: str) -> dict | None:
         async with self.db.pool.connection() as conn:
             return await (await conn.execute("SELECT * FROM app.bookings WHERE job_id = %s", (job_id,))).fetchone()
+
+    async def save_preparation_input(self, job_id: str, research_job_id: str, provider_id: str, slot_id: str) -> None:
+        async with self.db.pool.connection() as conn:  # an upsert: a job may run twice
+            await conn.execute(
+                "INSERT INTO app.preparations (job_id, research_job_id, provider_id, slot_id) VALUES (%s, %s, %s, %s) "
+                "ON CONFLICT (job_id) DO NOTHING",
+                (job_id, research_job_id, provider_id, slot_id),
+            )
+
+    async def save_preparation_result(self, job_id: str, result: dict) -> None:
+        async with self.db.pool.connection() as conn:
+            await conn.execute("UPDATE app.preparations SET result = %s WHERE job_id = %s", (json.dumps(result), job_id))
+
+    async def get_preparation(self, job_id: str) -> dict | None:
+        async with self.db.pool.connection() as conn:
+            return await (await conn.execute("SELECT * FROM app.preparations WHERE job_id = %s", (job_id,))).fetchone()
 
     async def set_outage(self, enabled: bool) -> None:
         async with self.db.pool.connection() as conn:

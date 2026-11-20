@@ -49,13 +49,24 @@ CREATE TABLE app.job_results (
     PRIMARY KEY (job_id, agent_hash, input_hash)
 );
 
-CREATE TABLE app.research_progress (
+-- Progress lines of any job (research or booking preparation), shown to the user as they happen.
+CREATE TABLE app.job_progress (
     seq        bigserial PRIMARY KEY,
     job_id     text NOT NULL,
     message    text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX ON app.research_progress (job_id, seq);
+CREATE INDEX ON app.job_progress (job_id, seq);
+
+-- The "prepare booking" job: what it was asked to prepare (so a retry can resume it) and what it produced.
+CREATE TABLE app.preparations (
+    job_id          text PRIMARY KEY,
+    research_job_id text NOT NULL REFERENCES app.appointment_requests(job_id),
+    provider_id     text NOT NULL REFERENCES app.providers(id),
+    slot_id         text NOT NULL REFERENCES app.availability_slots(id),
+    result          jsonb,
+    created_at      timestamptz NOT NULL DEFAULT now()
+);
 
 CREATE TABLE app.bookings (
     id              text PRIMARY KEY,
