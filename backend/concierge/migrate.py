@@ -7,6 +7,7 @@ from pathlib import Path
 import psycopg
 
 from concierge.config import DATABASE_URL
+from concierge.seed import seed
 
 log = logging.getLogger("migrate")
 MIGRATIONS = Path(__file__).parent / "migrations"
@@ -23,6 +24,8 @@ async def main() -> None:
             await conn.execute(file.read_text())
             await conn.execute("INSERT INTO public.schema_migrations VALUES (%s)", (file.name,))
             log.info("applied %s", file.name)
+        await seed(conn)  # providers and the next 14 days of slots; repeatable
+        log.info("seeded")
 
 
 if __name__ == "__main__":
