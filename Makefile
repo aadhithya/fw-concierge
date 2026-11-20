@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help up down restart logs ps build clean reset-db demo traces
+.PHONY: help up down restart logs ps build clean reset-db demo traces test
 
 help: ## Show this help
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-10s %s\n", $$1, $$2}'
@@ -34,3 +34,6 @@ demo: ## Run the scripted walkthrough against the running system
 
 traces: ## Open the Jaeger UI
 	open http://localhost:16686
+
+test: ## Run the tests (needs `make up`; no real model calls)
+	cd backend && uv run pytest -q
