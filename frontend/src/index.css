@@ -10,7 +10,7 @@
 /* A very faint grid on the deep blue, behind everything. */
 .app-bg {
   background-color: var(--background);
-  background-image: linear-gradient(oklch(0.8 0.06 265 / 5%) 1px, transparent 1px), linear-gradient(90deg, oklch(0.8 0.06 265 / 5%) 1px, transparent 1px);
+  background-image: linear-gradient(rgb(59 89 152 / 14%) 1px, transparent 1px), linear-gradient(90deg, rgb(59 89 152 / 14%) 1px, transparent 1px);
   background-size: 32px 32px;
 }
 
@@ -74,37 +74,37 @@
 }
 
 :root {
-    --background: oklch(0.15 0.045 265);
+    --background: #141d2f;
     --foreground: oklch(0.985 0 0);
-    --card: oklch(0.195 0.05 265);
+    --card: #1a253d;
     --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.195 0.05 265);
+    --popover: #1a253d;
     --popover-foreground: oklch(0.985 0 0);
     --primary: oklch(0.922 0 0);
     --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.26 0.055 265);
+    --secondary: #213150;
     --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.26 0.055 265);
-    --muted-foreground: oklch(0.72 0.035 265);
-    --accent: oklch(0.26 0.055 265);
+    --muted: #213150;
+    --muted-foreground: #9aa8c7;
+    --accent: #213150;
     --accent-foreground: oklch(0.985 0 0);
     --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(0.8 0.06 265 / 14%);
-    --input: oklch(0.8 0.06 265 / 18%);
-    --ring: oklch(0.6 0.12 265);
+    --border: rgb(59 89 152 / 35%);
+    --input: rgb(59 89 152 / 45%);
+    --ring: #3b5998;
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.195 0.05 265);
+    --sidebar: #1a253d;
     --sidebar-foreground: oklch(0.985 0 0);
     --sidebar-primary: oklch(0.488 0.243 264.376);
     --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.26 0.055 265);
+    --sidebar-accent: #213150;
     --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(0.8 0.06 265 / 14%);
-    --sidebar-ring: oklch(0.556 0 0);
+    --sidebar-border: rgb(59 89 152 / 35%);
+    --sidebar-ring: #3b5998;
     --radius: 0.625rem;
 }
 
