@@ -1,4 +1,4 @@
-# Appointment Concierge
+# fw-concierge
 
 A small, production-shaped demo of [Featherweight](https://github.com/aadhithya/featherweight): a chat assistant that finds a
 physiotherapy appointment in Munich, researches providers on a background worker, and books after an explicit confirmation.

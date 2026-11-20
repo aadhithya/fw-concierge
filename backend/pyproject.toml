@@ -1,7 +1,7 @@
 [project]
 name = "concierge"
 version = "0.1.0"
-description = "Appointment Concierge: a Featherweight showcase (fictional, simulated bookings)"
+description = "fw-concierge: a Featherweight showcase (fictional, simulated bookings)"
 requires-python = ">=3.12"
 dependencies = [
     "featherweight[postgres,otel]>=0.1.0",

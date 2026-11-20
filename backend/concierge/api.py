@@ -39,7 +39,7 @@ async def lifespan(app: FastAPI):
             yield
 
 
-app = FastAPI(title="Appointment Concierge (simulated)", lifespan=lifespan)
+app = FastAPI(title="fw-concierge (simulated)", lifespan=lifespan)
 FastAPIInstrumentor.instrument_app(app, excluded_urls="/api/health", exclude_spans=["send", "receive"])
 
 

@@ -42,10 +42,10 @@ export default function App() {
     <TooltipProvider>
       <SelectionProvider>
       <AssistantRuntimeProvider runtime={runtime}>
-        <div className="flex h-dvh flex-col bg-background text-foreground">
+        <div className="app-bg flex h-dvh flex-col text-foreground">
           <header className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-2">
             <div className="flex items-center gap-2">
-              <span className="font-semibold">Appointment Concierge</span>
+              <span className="font-semibold">fw-concierge</span>
               <Badge variant="outline">Simulated: fictional providers, no real bookings</Badge>
             </div>
             <div className="flex items-center gap-4 text-sm">

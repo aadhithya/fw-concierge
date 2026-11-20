@@ -1,4 +1,4 @@
-# Appointment Concierge. One image serves the API and runs the worker; Postgres and Jaeger are the only other services.
+# fw-concierge. One image serves the API and runs the worker; Postgres and Jaeger are the only other services.
 x-app: &app
   build: .
   env_file:
