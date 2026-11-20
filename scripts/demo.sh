@@ -10,9 +10,7 @@ print(json.dumps({'threadId':'demo','runId':'r','messages':[{'id':'1','role':'us
   | curl -sN "$API/api/agui" -H 'content-type: application/json' -d @-; }
 wait_state() { for _ in $(seq 60); do s=$(curl -s "$API/api/jobs/$1/stream" -m 1 | grep -o '"state": "[a-z]*"' | tail -1 | cut -d'"' -f4 || true); case "$s" in completed|failed) echo "$s"; return;; esac; sleep 0.5; done; }
 step() { printf '\n\033[1m== %s\033[0m\n' "$1"; }
-put_outage() { curl -s -X PUT "$API/api/demo/outage" -H 'content-type: application/json' -d "{\"enabled\":$1}" >/dev/null; }
 
-put_outage false
 step "1. An incomplete request: the assistant asks, it does not invent a location or dates"
 chat "I need a physio soon" | grep -o '"delta":"[^"]*"' | cut -d'"' -f4 | tr -d '\n'; echo
 
@@ -30,16 +28,14 @@ PROVIDER=$(json "d['result']['shortlist'][0]['provider']['id']" < /tmp/demo-job.
 SLOT=$(json "d['result']['shortlist'][0]['slots'][0]['id']" < /tmp/demo-job.json)
 
 prepare() { curl -s "$API/api/preparations" -H 'content-type: application/json' \
-  -d "{\"job_id\":\"$RESEARCH\",\"provider_id\":\"$PROVIDER\",\"slot_id\":\"$SLOT\"}" | json "d['job_id']"; }
+  -d "{\"job_id\":\"$RESEARCH\",\"provider_id\":\"$PROVIDER\",\"slot_id\":\"$SLOT\",\"simulate_failure\":$1}" | json "d['job_id']"; }
 show() { curl -s "$API/api/preparations/$1" | json "d['state'] + '  ' + str([p['message'] for p in d['progress']])"; }
 
-step "4. Failure: with the outage switch on, 'prepare booking' fails after its first agent"
-put_outage true
-P1=$(prepare); echo "prepare job: $P1"; echo "state: $(wait_state "$P1")"; show "$P1"
+step "4. Failure: with the failure parameter on, 'prepare booking' fails after its first agent"
+P1=$(prepare true); echo "prepare job: $P1"; echo "state: $(wait_state "$P1")"; show "$P1"
 
 step "5. Retry is a RESUME: the finished first step is reused, only the second agent runs"
-put_outage false
-P2=$(curl -s -X POST "$API/api/preparations/$P1/retry" | json "d['job_id']"); echo "resumed job: $P2"; echo "state: $(wait_state "$P2")"; show "$P2"
+P2=$(curl -s -X POST "$API/api/preparations/$P1/retry" -H 'content-type: application/json' -d '{"simulate_failure":false}' | json "d['job_id']"); echo "resumed job: $P2"; echo "state: $(wait_state "$P2")"; show "$P2"
 curl -s "$API/api/preparations/$P2" | json "'confirmation: ' + d['result']['confirmation']"
 
 step "6. Booking needs an explicit confirmation; the same confirmation twice makes ONE booking"

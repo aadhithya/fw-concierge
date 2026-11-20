@@ -1,6 +1,6 @@
 # Architecture
 
-Five containers from one `compose.yaml`. The API and the worker are **one image with two commands**.
+Six containers from one `compose.yaml`. The API, the worker and the MCP service are **one image with three commands**.
 
 ```mermaid
 flowchart LR
@@ -13,6 +13,7 @@ flowchart LR
     w -. "run log" .-> fw
     api -- "model calls" --> llm["Gemini (live) / fakes (demo)"]
     w -- "model calls" --> llm
+    w -- "MCP tool call" --> mcp["provider-service<br/>(MCP server)"]
     api -. "OTLP spans" .-> j["Jaeger"]
     w -. "OTLP spans" .-> j
 ```
@@ -23,6 +24,7 @@ flowchart LR
 | `migrate` | One-shot: applies the SQL migrations and seeds the fictional providers, then exits |
 | `api` | Serves the UI and the API: the AG-UI chat stream, job status/progress (SSE), retry, bookings. Runs the chat agent and **submits** jobs. Never runs one |
 | `worker` | Claims submitted jobs from the queue and runs them: the research and the booking preparation |
+| `provider-service` | A mock provider service: an MCP server with one slow tool, `search_providers`. The research agent calls it over MCP and forwards its answer |
 | `jaeger` | Trace backend (in memory: traces are lost on restart) |
 
 The API and the worker meet only in Postgres: the queue and the database. The browser talks only to the API's HTTP endpoints and
@@ -34,7 +36,7 @@ the AG-UI stream. It never sees featherweight's run log, queue or agent classes.
 
 | Schema | Owner | Holds |
 |---|---|---|
-| `app` | The application | `providers`, `availability_slots` (the mock catalogue), `appointment_requests`, `research_results`, `preparations`, `bookings`, `job_progress` (what the UI shows), `demo_settings`, and **`job_results`**, the output store behind featherweight's `ResultStore` |
+| `app` | The application | `providers`, `availability_slots` (the mock catalogue), `appointment_requests` (the research request), `preparations`, `bookings`, `job_progress` (what the UI shows), and **`job_results`**, the output store behind featherweight's `ResultStore` |
 | `featherweight` | The framework | The run log: jobs, agent runs (status, tokens, timing, hashes), job events and leases. Created by `PostgresDatabase` |
 | `fw_adapters` | The application, for the framework | `job_queue`, behind featherweight's `JobQueue` |
 
@@ -47,8 +49,8 @@ Agents never touch these tables. They reach providers and availability only thro
 
 ## Two jobs, two roles
 
-| | `research_providers` | `prepare_booking` |
+| | `Researcher` (an agent) | `prepare_booking` (a job) |
 |---|---|---|
 | Started by | The chat agent, as a **background agent** | The "Prepare booking" button, with `client.submit(..., resumable=True)` |
-| Agents | `ProviderResearcher` (one per provider, in parallel), then `Evaluator` | `BookingBriefer`, then `ConfirmationWriter` |
-| Retry | Not offered | **Resume**: the finished first agent is reused |
+| Agents | `Researcher`: one agent, one MCP tool that sleeps and returns the findings | `BookingBriefer`, then `ConfirmationWriter` |
+| Retry | A new run with the same request | **Resume**: the finished first agent is reused |

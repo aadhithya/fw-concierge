@@ -6,6 +6,7 @@ The API has no worker in it: it submits jobs (inside the chat agent's tool), fol
 
 import asyncio
 import json
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -13,15 +14,17 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from pydantic import BaseModel
 
 from concierge import deps
 from concierge.chat import Concierge
+from concierge.client import ControlledJobClient, provider_sleep
 from concierge.config import DATABASE_URL, STATIC_DIR
 from concierge.domain import Database, PgAvailability, PgCatalog, Repository, SearchRequest, SlotTaken
 from concierge.fw_adapters import PostgresQueue, PostgresResultStore
 from concierge.booking_prep import PrepareInput, prepare_booking
-from concierge.research import research_providers
+from concierge.research import ResearchInput, Researcher
+from concierge.schemas import BookingIn, PrepareIn, RetryPreparationIn, RetryResearchIn
+from concierge.wake import FINAL, wake_text
 from concierge.telemetry import setup as setup_telemetry
 from featherweight import AgentRunner, BadRequest, JobClient, PostgresDatabase, RunStatus
 from featherweight.adapters import agui
@@ -33,7 +36,7 @@ async def lifespan(app: FastAPI):
     async with Database(DATABASE_URL) as app_db, PostgresDatabase(DATABASE_URL) as db:  # the app's data / featherweight's run log
         results = PostgresResultStore(app_db.pool)
         deps.repo, deps.catalog, deps.availability = Repository(app_db), PgCatalog(app_db), PgAvailability(app_db)
-        deps.client = JobClient(db, PostgresQueue(app_db.pool, db), results, observers=observers)
+        deps.client = ControlledJobClient(db, PostgresQueue(app_db.pool, db), results, observers=observers)
         # background=client: the chat agent's `start_background` submits jobs to the queue, for a worker to run
         async with AgentRunner(db, results=results, observers=observers, background=deps.client) as deps.runner:
             yield
@@ -45,17 +48,26 @@ FastAPIInstrumentor.instrument_app(app, excluded_urls="/api/health", exclude_spa
 
 @app.exception_handler(BadRequest)
 async def bad_request(request: Request, exc: BadRequest):
+    """A request body featherweight cannot read as a chat request (for example a system message) is answered with 422 and the reason."""
     return JSONResponse({"error": str(exc)}, status_code=422)
 
 
 @app.get("/api/health")
 async def health():
+    """Liveness check, used by Docker Compose to wait until the API is up."""
     return {"status": "ok"}
 
 
 @app.post("/api/agui")
 async def agui_chat(request: Request):
-    """The chat. The client sends the whole conversation; featherweight keeps none."""
+    """POST /api/agui: one chat turn, streamed as AG-UI events.
+
+    The browser sends the whole conversation (featherweight keeps none); `agui.parse_request` reads it, `runner.stream` runs the
+    concierge agent, and `agui.encode` streams its words and events back. When the chat starts the research (a background agent),
+    the stream carries a `background_started` event with the job id. The `x-provider-sleep` header is a demo control (see below).
+    """
+    sleep = request.headers.get("x-provider-sleep")  # demo control: how long the mock provider service takes
+    provider_sleep.set(min(max(float(sleep), 0), 20) if sleep else None)
     run = deps.runner.stream(Concierge, agui.parse_request(await request.body()))
     return StreamingResponse(agui.encode(run), headers=agui.HEADERS, media_type=agui.CONTENT_TYPE)
 
@@ -68,6 +80,12 @@ STATES = {  # featherweight's job status -> the lifecycle the UI shows
 }
 
 
+async def research_result(job_id: str) -> dict | None:
+    """What the research agent returned, read from the result store (featherweight's `client.result`)."""
+    result = await deps.client.result(Researcher, job_id)
+    return result.model_dump(mode="json", exclude={"open_questions"}) if result else None
+
+
 async def job_view(job_id: str) -> dict:
     """Everything the UI needs to show a job again after a refresh. Built from the app's tables and the run log."""
     try:
@@ -77,19 +95,29 @@ async def job_view(job_id: str) -> dict:
     criteria = await deps.repo.get_request(job_id)
     state = STATES[row.status]
     booking = await deps.repo.booking_for_job(job_id)
+    wake = None
+    if state in FINAL:  # what the chat must hear about this ending (see wake.py); the browser sends it as the next turn
+        try:
+            wake = await wake_text(job_id, state)
+        except Exception:  # never let this break the job view: the card still shows the state
+            logging.getLogger("api").warning("could not build the wake message for %s", job_id, exc_info=True)
     return {
         "job_id": job_id,
         "state": state,
         "error": row.error_type,
         "criteria": criteria,
-        "result": await deps.repo.get_result(job_id) if state == "completed" else None,
+        "result": await research_result(job_id) if state == "completed" else None,
         "booking": await booking_view(booking) if booking else None,
         "progress": [{"seq": p["seq"], "message": p["message"]} for p in await deps.repo.progress(job_id)],
+        "wake": wake,
     }
 
 
 @app.get("/api/jobs/{job_id}")
 async def get_job(job_id: str):
+    """GET /api/jobs/{id}: everything the UI needs to show a research again after a refresh: its state, the request as the chat understood
+    it, the progress lines, the research agent's result once it has finished, any booking made from it, and `wake` (the message the chat should be told
+    when the job has ended, see wake.py)."""
     return await job_view(job_id)
 
 
@@ -99,7 +127,11 @@ def sse(event: str, data: dict, id: int | None = None) -> str:
 
 @app.get("/api/jobs/{job_id}/stream")
 async def job_stream(job_id: str, request: Request):
-    """Progress lines and state changes of ONE job (research or preparation), as server-sent events. A reconnecting browser resumes from Last-Event-ID."""
+    """GET /api/jobs/{id}/stream: live progress of ONE job (research or preparation) as server-sent events.
+
+    One `progress` event per progress line the job writes and one `state` event per change (queued, running, completed, failed). It
+    ends when the job does. A reconnecting browser resumes from its `Last-Event-ID`.
+    """
     after = int(request.headers.get("last-event-id", 0))
     try:
         await deps.client.status(job_id)  # 404 early
@@ -125,38 +157,38 @@ async def job_stream(job_id: str, request: Request):
 
 
 @app.post("/api/jobs/{job_id}/retry")
-async def retry_job(job_id: str):
-    """Retry a failed research: the same request, submitted as a new job."""
+async def retry_job(job_id: str, body: RetryResearchIn | None = None):
+    """POST /api/jobs/{id}/retry: run a failed research again, with the same request, as a new job (not a resume). Returns the new job id."""
     view = await job_view(job_id)
     if view["state"] != "failed" or view["criteria"] is None:
         raise HTTPException(409, "Only a failed job can be retried")
-    return {"job_id": await deps.client.submit(research_providers, SearchRequest.model_validate(view["criteria"]))}
+    criteria = SearchRequest.model_validate(view["criteria"])
+    if body and body.provider_sleep_seconds is not None:
+        criteria = criteria.model_copy(update={"provider_sleep_seconds": body.provider_sleep_seconds})
+    return {"job_id": await deps.client.submit(Researcher, ResearchInput.model_validate(criteria.model_dump()))}
 
-
-class OutageIn(BaseModel):
-    enabled: bool
 
 
 # ------------------------------------------------------------------------------------------ prepare booking (resumable job)
 
 
-class PrepareIn(BaseModel):
-    job_id: str  # the research job whose shortlist the user picked from
-    provider_id: str
-    slot_id: str
-
-
 @app.post("/api/preparations")
 async def start_preparation(body: PrepareIn):
-    """The "Prepare booking" button: submit the two-agent job. `resumable=True` keeps its steps, so a failure can be resumed."""
+    """POST /api/preparations: the "Prepare booking" button. Submits the two-agent job for the chosen provider and slot.
+
+    `resumable=True` keeps the steps' outputs, so if the job fails (the demo failure flag) a retry can resume it. Returns the job id.
+    """
     if await deps.repo.get_request(body.job_id) is None:
         raise HTTPException(404, "No such research")
-    prepare = PrepareInput(research_job_id=body.job_id, provider_id=body.provider_id, slot_id=body.slot_id)
+    prepare = PrepareInput(
+        research_job_id=body.job_id, provider_id=body.provider_id, slot_id=body.slot_id, simulate_failure=body.simulate_failure
+    )
     return {"job_id": await deps.client.submit(prepare_booking, prepare, resumable=True)}
 
 
 @app.get("/api/preparations/{job_id}")
 async def get_preparation(job_id: str):
+    """GET /api/preparations/{id}: the state, progress lines and result (the confirmation text) of one preparation job."""
     try:
         row = await deps.client.status(job_id)
     except Exception:
@@ -172,35 +204,20 @@ async def get_preparation(job_id: str):
 
 
 @app.post("/api/preparations/{job_id}/retry")
-async def retry_preparation(job_id: str):
-    """Resume a failed preparation as a new job: the steps that succeeded (the first agent) are reused, the rest runs."""
+async def retry_preparation(job_id: str, body: RetryPreparationIn | None = None):
+    """POST /api/preparations/{id}/retry: resume a failed preparation as a new job. The steps that succeeded (the first agent) are reused
+    with no model call, and only the rest runs. Returns the new job id."""
     prep = await deps.repo.get_preparation(job_id)
     if prep is None or STATES[(await deps.client.status(job_id)).status] != "failed":
         raise HTTPException(409, "Only a failed preparation can be retried")
-    again = PrepareInput(research_job_id=prep["research_job_id"], provider_id=prep["provider_id"], slot_id=prep["slot_id"])
+    again = PrepareInput(
+        research_job_id=prep["research_job_id"], provider_id=prep["provider_id"], slot_id=prep["slot_id"],
+        simulate_failure=bool(body and body.simulate_failure),
+    )
     return {"job_id": await deps.client.submit(prepare_booking, again, resumable=True, resume_from=job_id)}
 
 
-@app.get("/api/demo/outage")
-async def get_outage():
-    return {"enabled": await deps.repo.outage()}
-
-
-@app.put("/api/demo/outage")
-async def set_outage(body: OutageIn):
-    """Demo switch: while on, a booking preparation fails after its first agent, so it can be retried (resumed)."""
-    await deps.repo.set_outage(body.enabled)
-    return body
-
-
 # --------------------------------------------------------------------------------------------------------------- bookings
-
-
-class BookingIn(BaseModel):
-    job_id: str
-    provider_id: str
-    slot_id: str
-    idempotency_key: str  # the same key always returns the same booking
 
 
 async def booking_view(booking: dict) -> dict:
@@ -218,7 +235,11 @@ async def booking_view(booking: dict) -> dict:
 
 @app.post("/api/bookings")
 async def create_booking(body: BookingIn):
-    """The only place a booking is created, and only when the user explicitly confirms. Plain application code: no agent."""
+    """POST /api/bookings: the explicit confirmation, and the only place a booking is created. Plain application code: no agent decides.
+
+    Idempotent: the same `idempotency_key` returns the same booking (200) instead of making a second one (the first is 201). A slot
+    that is not open any more is 409.
+    """
     if await deps.repo.get_request(body.job_id) is None:
         raise HTTPException(404, "No such job")
     try:
@@ -233,6 +254,7 @@ async def create_booking(body: BookingIn):
 
 @app.get("/api/bookings/{booking_id}")
 async def get_booking(booking_id: str):
+    """GET /api/bookings/{id}: a booking, with its provider and slot. Always marked simulated."""
     booking = await deps.repo.get_booking(booking_id)
     if booking is None:
         raise HTTPException(404, "No such booking")

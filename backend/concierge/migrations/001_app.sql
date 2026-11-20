@@ -32,12 +32,6 @@ CREATE TABLE app.appointment_requests (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE app.research_results (
-    job_id     text PRIMARY KEY REFERENCES app.appointment_requests(job_id),
-    result     jsonb NOT NULL,              -- the shortlist: verified data and model-written reasons kept apart
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-
 -- Outputs of jobs and agents, behind featherweight's `ResultStore`. This is application data (it holds user content, and
 -- in a multi-tenant app it would be tenant-scoped), so it lives here, under the app's own retention and access rules.
 CREATE TABLE app.job_results (
@@ -75,10 +69,4 @@ CREATE TABLE app.bookings (
     provider_id     text NOT NULL REFERENCES app.providers(id),
     slot_id         text NOT NULL UNIQUE REFERENCES app.availability_slots(id),  -- a slot is booked once
     created_at      timestamptz NOT NULL DEFAULT now()
-);
-
--- Demo switches, such as "simulate a provider outage". Read by the worker at the moment it looks availability up.
-CREATE TABLE app.demo_settings (
-    key   text PRIMARY KEY,
-    value text NOT NULL
 );

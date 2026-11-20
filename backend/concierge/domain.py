@@ -11,7 +11,7 @@ from typing import Literal, Protocol
 
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 REGION = "Munich"  # providers are fictional; the city and its neighbourhoods are real
 NEIGHBOURHOODS = ["Schwabing", "Maxvorstadt", "Haidhausen", "Sendling", "Giesing", "Neuhausen"]
@@ -34,6 +34,9 @@ class SearchRequest(BaseModel):
     date_to: date
     preferences: list[str] = []  # short phrases: 'back pain', 'evening', 'home visit'
     service_category: Literal["physiotherapy"] = "physiotherapy"
+    # Demo control, not part of what the user wants: how long the mock provider service (an MCP server) takes. The UI sets it
+    # (see api.py); leave it at the default.
+    provider_sleep_seconds: float = Field(default=4, ge=0, le=20)
 
     @field_validator("location")
     @classmethod
@@ -69,6 +72,29 @@ class Slot(BaseModel):
     starts_at: datetime
     duration_min: int
     status: str
+
+
+# A preference phrase that names an attribute of the provider: (the attribute, how it reads as a match)
+ATTRIBUTE_PREFERENCES = {
+    "evening": ("evenings", "evening appointments"),
+    "weekend": ("weekends", "weekend appointments"),
+    "home visit": ("home_visits", "home visits"),
+    "accessible": ("accessible", "step-free access"),
+}
+
+
+def match_preferences(provider: Provider, preferences: list[str]) -> tuple[list[str], list[str]]:
+    """Which of the user's preferences a provider meets, and which it does not. Plain comparison of known attributes."""
+    matched, concerns = [], []
+    for preference in preferences:
+        wanted = preference.lower()
+        attribute = next((v for k, v in ATTRIBUTE_PREFERENCES.items() if k in wanted), None)
+        if attribute:
+            ok, label = bool(getattr(provider, attribute[0])), attribute[1]
+        else:  # otherwise it names a condition: compare with the provider's tags
+            ok, label = any(wanted in tag or tag in wanted for tag in provider.tags), f"treats {wanted}"
+        (matched if ok else concerns).append(label if ok else preference)
+    return matched, concerns
 
 
 class ProviderCatalog(Protocol):
@@ -157,19 +183,6 @@ class Repository:
             row = await (await conn.execute("SELECT criteria FROM app.appointment_requests WHERE job_id = %s", (job_id,))).fetchone()
         return row["criteria"] if row else None
 
-    async def save_result(self, job_id: str, result: dict) -> None:  # an upsert, for the same reason
-        async with self.db.pool.connection() as conn:
-            await conn.execute(
-                "INSERT INTO app.research_results (job_id, result) VALUES (%s, %s) "
-                "ON CONFLICT (job_id) DO UPDATE SET result = excluded.result",
-                (job_id, json.dumps(result)),
-            )
-
-    async def get_result(self, job_id: str) -> dict | None:
-        async with self.db.pool.connection() as conn:
-            row = await (await conn.execute("SELECT result FROM app.research_results WHERE job_id = %s", (job_id,))).fetchone()
-        return row["result"] if row else None
-
     async def add_progress(self, job_id: str, message: str) -> None:
         async with self.db.pool.connection() as conn:
             await conn.execute("INSERT INTO app.job_progress (job_id, message) VALUES (%s, %s)", (job_id, message))
@@ -230,18 +243,6 @@ class Repository:
     async def get_preparation(self, job_id: str) -> dict | None:
         async with self.db.pool.connection() as conn:
             return await (await conn.execute("SELECT * FROM app.preparations WHERE job_id = %s", (job_id,))).fetchone()
-
-    async def set_outage(self, enabled: bool) -> None:
-        async with self.db.pool.connection() as conn:
-            await conn.execute(
-                "INSERT INTO app.demo_settings (key, value) VALUES ('outage', %s) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-                ("1" if enabled else "0",),
-            )
-
-    async def outage(self) -> bool:
-        async with self.db.pool.connection() as conn:
-            row = await (await conn.execute("SELECT value FROM app.demo_settings WHERE key = 'outage'")).fetchone()
-        return bool(row and row["value"] == "1")
 
 
 class SlotTaken(Exception):

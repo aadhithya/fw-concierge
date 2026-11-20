@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { book, getPreparation, retryPreparation, startPreparation, when, type Booking, type Preparation, type Slot } from './api'
+import { useControls } from './controls'
 import { useSelection, type Selection } from './selection'
 
 const STATE_STYLE: Record<string, string> = {
@@ -27,6 +28,7 @@ export function BookingPane() {
 
 function Flow({ selection }: { selection: Selection }) {
   const { item, slot, researchJobId } = selection
+  const { controls } = useControls()
   const [prepId, setPrepId] = useState<string | null>(null)
   const [state, setState] = useState<string>('queued')
   const [lines, setLines] = useState<string[]>([])
@@ -81,7 +83,7 @@ function Flow({ selection }: { selection: Selection }) {
         </div>
       ) : (
         <>
-          {!prepId && <Button onClick={() => run(() => startPreparation(researchJobId, item.provider.id, slot.id))}>Prepare booking</Button>}
+          {!prepId && <Button onClick={() => run(() => startPreparation(researchJobId, item.provider.id, slot.id, controls.simulateFailure))}>Prepare booking</Button>}
 
           {prepId && (
             <div className="space-y-2 rounded-md border p-3">
@@ -94,7 +96,7 @@ function Flow({ selection }: { selection: Selection }) {
               {state === 'failed' && (
                 <div className="space-y-2">
                   <div className="text-red-400">It failed ({failure ?? 'error'}) after the first step. Retrying resumes the job: the finished step is reused.</div>
-                  <Button size="sm" onClick={() => run(() => retryPreparation(prepId))}>Retry</Button>
+                  <Button size="sm" onClick={() => run(() => retryPreparation(prepId, controls.simulateFailure))}>Retry</Button>
                 </div>
               )}
               {state === 'completed' && result && (

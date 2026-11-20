@@ -6,8 +6,7 @@ export type Provider = {
 }
 export type ShortlistItem = {
   rank: number; provider: Provider; slots: Slot[]
-  reasons: string[] // written by the model
-  fit: string; matched: string[]; concerns: string[]
+  reasons: string[] // from the provider service
 }
 export type Booking = { id: string; status: string; simulated: boolean; provider: Provider; slot: Slot; job_id: string }
 export type Job = {
@@ -18,6 +17,7 @@ export type Job = {
   result: { summary: string; considered: number; shortlist: ShortlistItem[] } | null
   booking: Booking | null
   progress: { seq: number; message: string }[]
+  wake: string | null // once the job is final: the message the chat should be told (built by the server)
 }
 
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
@@ -35,16 +35,15 @@ export type PreparationState = {
   job_id: string; state: Job['state']; error: string | null; result: Preparation | null
   progress: { seq: number; message: string }[]
 }
-export const startPreparation = (job_id: string, provider_id: string, slot_id: string) =>
-  call<{ job_id: string }>('/api/preparations', { method: 'POST', body: JSON.stringify({ job_id, provider_id, slot_id }) })
+export const startPreparation = (job_id: string, provider_id: string, slot_id: string, simulate_failure: boolean) =>
+  call<{ job_id: string }>('/api/preparations', { method: 'POST', body: JSON.stringify({ job_id, provider_id, slot_id, simulate_failure }) })
 export const getPreparation = (id: string) => call<PreparationState>(`/api/preparations/${id}`)
-export const retryPreparation = (id: string) => call<{ job_id: string }>(`/api/preparations/${id}/retry`, { method: 'POST' })
+export const retryPreparation = (id: string, simulate_failure: boolean) =>
+  call<{ job_id: string }>(`/api/preparations/${id}/retry`, { method: 'POST', body: JSON.stringify({ simulate_failure }) })
 
 export const getJob = (id: string) => call<Job>(`/api/jobs/${id}`)
-export const retryJob = (id: string) => call<{ job_id: string }>(`/api/jobs/${id}/retry`, { method: 'POST' })
-export const getOutage = () => call<{ enabled: boolean }>('/api/demo/outage')
-export const setOutage = (enabled: boolean) =>
-  call('/api/demo/outage', { method: 'PUT', body: JSON.stringify({ enabled }) })
+export const retryJob = (id: string, provider_sleep_seconds: number) =>
+  call<{ job_id: string }>(`/api/jobs/${id}/retry`, { method: 'POST', body: JSON.stringify({ provider_sleep_seconds }) })
 export const book = (job_id: string, provider_id: string, slot_id: string, idempotency_key: string) =>
   call<Booking>('/api/bookings', { method: 'POST', body: JSON.stringify({ job_id, provider_id, slot_id, idempotency_key }) })
 

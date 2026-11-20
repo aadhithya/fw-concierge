@@ -17,6 +17,7 @@ import {
   ReasoningTrigger,
 } from "@/components/assistant-ui/elements/reasoning.aui";
 import { ToolFallback } from "@/components/assistant-ui/elements/tool-fallback.aui";
+import { isWake, WakeNotice } from "@/WakeNotice";
 import {
   ToolGroupContent,
   ToolGroupRoot,
@@ -752,6 +753,9 @@ const UserImagePart: ImageMessagePartComponent = (part) => (
 );
 
 const UserMessage: FC = () => {
+  // the application's message about a finished research is not something the user typed: show a notice instead
+  const text = useAuiState((s) => (s.message.content[0]?.type === "text" ? s.message.content[0].text : ""));
+  if (isWake(text)) return <WakeNotice text={text} />;
   return (
     <MessagePrimitive.Root
       data-slot="aui_user-message-root"

@@ -1,46 +1,62 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { HttpAgent } from '@ag-ui/client'
-import { AssistantRuntimeProvider, type ToolCallMessagePartProps } from '@assistant-ui/react'
+import { AssistantRuntimeProvider } from '@assistant-ui/react'
 import { useAgUiRuntime } from '@assistant-ui/react-ag-ui'
 import { Thread } from '@/components/assistant-ui/elements/thread.aui'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Switch } from '@/components/ui/switch'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import { getOutage, setOutage } from './api'
 import { BookingPane } from './BookingPane'
+import { ControlsPane, ControlsProvider, useControls } from './controls'
 import { ResearchCard } from './ResearchCard'
-import { SelectionProvider } from './selection'
+import { SelectionProvider, useSelection } from './selection'
 
-const LAST_JOB = 'concierge.lastJob' // so a refresh can show the research again; the state itself is read from the API
+const STORE = 'concierge.researches' // the researches of this browser, so a refresh shows them again; their state is read from the API
+const MAX = 8
 
-const remember = (id: string) => { try { localStorage.setItem(LAST_JOB, id) } catch { /* private mode: fine */ } }
-const recall = () => { try { return localStorage.getItem(LAST_JOB) } catch { return null } }
+const load = (): string[] => { try { return JSON.parse(localStorage.getItem(STORE) ?? '[]') } catch { return [] } }
+const save = (ids: string[]) => { try { localStorage.setItem(STORE, JSON.stringify(ids)) } catch { /* private mode: fine */ } }
 
-/** How the chat renders a tool call. The framework's `start_background` call (the research job) becomes the research card;
- *  the chat agent's other tool calls (such as looking up today's date) are not shown. */
-function ToolCall({ toolName, result }: ToolCallMessagePartProps) {
-  if (toolName !== 'start_background') return null
-  const started = typeof result === 'string' ? safeJson(result) : result
-  if (!started?.job_id) return <div className="my-2 text-sm text-muted-foreground">Starting the research…</div>
-  return <ResearchCard jobId={started.job_id} onJob={remember} />
-}
-// The thread folds tool calls into a collapsed "N tool calls" group by default. The research card must stay visible.
-const PlainGroup = ({ children }: { children?: ReactNode }) => <>{children}</>
-const safeJson = (text: string) => { try { return JSON.parse(text) } catch { return null } }
+// The chat shows only words. Its tool calls (today's date, the agent's schema, starting the research) are not shown: the
+// research card comes from featherweight's `background_started` event instead, which does not depend on a model streaming its
+// tool calls. The thread folds tool calls into a collapsed "N tool calls" row by default, so both are replaced by nothing.
+const NoToolCall = () => null
+const NoToolGroup = ({ children }: { children?: ReactNode }) => <>{children}</>
 
 export default function App() {
+  return <ControlsProvider><SelectionProvider><Concierge /></SelectionProvider></ControlsProvider>
+}
+
+function Concierge() {
   const agent = useMemo(() => new HttpAgent({ url: '/api/agui' }), [])
   const runtime = useAgUiRuntime({ agent })
-  const [outage, setOutageState] = useState(false)
-  const [last, setLast] = useState<string | null>(recall)
-  const [showLast, setShowLast] = useState(false)
+  const { controls } = useControls()
+  const [jobs, setJobs] = useState<string[]>(load) // the researches, newest first (those of earlier visits are restored)
+  const [live, setLive] = useState<Set<string>>(new Set()) // the ones started in this conversation: only they wake the chat
 
-  useEffect(() => { getOutage().then((o) => setOutageState(o.enabled)).catch(() => {}) }, [])
+  useEffect(() => save(jobs), [jobs])
+
+  // The delay of the mock provider service is a parameter of the chat request: the chat's model builds the research input, so the
+  // server applies it when it submits the research (see ControlledJobClient in client.py).
+  useEffect(() => { agent.headers = { ...agent.headers, 'x-provider-sleep': String(controls.sleepSeconds) } }, [agent, controls.sleepSeconds])
+
+  const add = (jobId: string, isLive: boolean) => {
+    setJobs((current) => [jobId, ...current.filter((id) => id !== jobId)].slice(0, MAX))
+    if (isLive) setLive((current) => new Set(current).add(jobId))
+  }
+
+  // featherweight emits `background_started` (with the job id) on the chat stream when the chat starts a background agent.
+  useEffect(() => {
+    const subscription = agent.subscribe({
+      onCustomEvent: ({ event }) => {
+        const jobId = event.name === 'background_started' ? event.value?.job_id : null
+        if (jobId) add(jobId, true)
+      },
+    })
+    return () => subscription.unsubscribe()
+  }, [agent])
 
   return (
     <TooltipProvider>
-      <SelectionProvider>
       <AssistantRuntimeProvider runtime={runtime}>
         <div className="app-bg flex h-dvh flex-col text-foreground">
           <header className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-2">
@@ -48,24 +64,33 @@ export default function App() {
               <span className="font-semibold">fw-concierge</span>
               <Badge variant="outline">Simulated: fictional providers, no real bookings</Badge>
             </div>
-            <div className="flex items-center gap-4 text-sm">
-              {last && <Button size="sm" variant="ghost" onClick={() => setShowLast((v) => !v)}>Last research</Button>}
-              <label className="flex items-center gap-2 text-muted-foreground">
-                Simulate outage in booking preparation
-                <Switch checked={outage} onCheckedChange={(on) => { setOutageState(on); setOutage(on) }} />
-              </label>
-            </div>
           </header>
-          {showLast && last && (
-            <div className="mx-auto w-full max-w-2xl px-4"><ResearchCard jobId={last} onJob={(id) => { remember(id); setLast(id) }} /></div>
-          )}
           <main className="grid min-h-0 flex-1 md:grid-cols-2">
-            <section className="min-h-0 border-r"><Thread components={{ ToolFallback: ToolCall, ToolGroup: PlainGroup }} /></section>
-            <aside className="min-h-0 overflow-y-auto"><BookingPane /></aside>
+            <section className="min-h-0 border-r">
+              <Thread components={{ ToolFallback: NoToolCall, ToolGroup: NoToolGroup }} />
+            </section>
+            <RightPane jobs={jobs} live={live} onRetry={(id) => add(id, true)} />
           </main>
         </div>
       </AssistantRuntimeProvider>
-      </SelectionProvider>
     </TooltipProvider>
+  )
+}
+
+/** The right-hand pane does not scroll itself. It has three parts: the research cards and the booking flow, each scrolling inside
+ *  its own area, and the demo controls, anchored at the bottom. */
+function RightPane({ jobs, live, onRetry }: { jobs: string[]; live: Set<string>; onRetry: (jobId: string) => void }) {
+  const { selection } = useSelection()
+  return (
+    <aside className="flex min-h-0 flex-col overflow-hidden">
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
+        {jobs.length === 0 && <div className="p-4 text-center text-sm text-muted-foreground">Describe what you need in the chat: the research appears here.</div>}
+        {jobs.map((id, index) => <ResearchCard key={id} jobId={id} wake={live.has(id)} newest={index === 0} onRetry={onRetry} />)}
+      </div>
+      <div className={selection ? 'min-h-0 flex-1 overflow-y-auto border-t p-2' : 'shrink-0 border-t'}>
+        <BookingPane />
+      </div>
+      <div className="shrink-0 border-t p-2"><ControlsPane /></div>
+    </aside>
   )
 }

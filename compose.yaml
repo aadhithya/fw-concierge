@@ -7,8 +7,11 @@ x-app: &app
   environment: &env
     DATABASE_URL: postgresql://concierge:concierge@postgres:5432/concierge
     OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+    PROVIDER_SERVICE_URL: http://provider-service:8001/mcp
     DEMO_MODE: ${DEMO_MODE:-1}
     LLM: ${LLM:-gemini}
+    # SPAN_ONLY puts messages, tool arguments and results on the spans (for debugging: it holds user content). Off by default.
+    OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT: ${TRACE_CONTENT:-off}
     GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
 
 services:
@@ -49,12 +52,22 @@ services:
       timeout: 3s
       retries: 20
 
+  provider-service:  # a mock provider service, as an MCP server in a container of its own. The research agent calls it
+    <<: *app
+    command: python -m concierge.mcp
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8001), 2)"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
   worker:
     <<: *app
     command: python -m concierge.worker
     depends_on:
       migrate: { condition: service_completed_successfully }
       jaeger: { condition: service_started }
+      provider-service: { condition: service_healthy }
 
   jaeger:  # trace backend (in-memory: traces are lost on restart)
     image: jaegertracing/jaeger:2.11.0
