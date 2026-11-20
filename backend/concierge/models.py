@@ -27,5 +27,5 @@ def model_for(role: str) -> ModelSettings:
     if DEMO_MODE:
         return DemoSettings(role=role)
     if LLM == "gemma":
-        return Gemma(model="gemma-4-31b-it", thinking="minimal")  # thinking: "minimal" (off) or "high"
+        return Gemma(model="gemma-4-31b-it", thinking="high")  # "high": it follows tool instructions better, and Gemma is free
     return Gemini(model="gemini-3.5-flash-lite", thinking="low")

@@ -35,13 +35,15 @@ class ResearchResult(AgentOutput):
 class Researcher(AgentBase):
     name: str = "researcher"
     description: str = "Researches physiotherapy providers and their open slots for a search request, using the provider service"
-    version: str = "1"
+    version: str = "2"
     prompt: str = (
-        "Call providers_search_providers exactly once, with the request's location, date_from, date_to and preferences, and "
-        "sleep_seconds set to provider_sleep_seconds from the input. It is slow: that is expected. Then return what it gave "
-        "back as your result: shortlist is its providers, copied exactly with their slots and reasons; considered is its "
-        "considered count; summary is one sentence. Never invent a provider or a slot. If it returned no providers, leave "
-        "shortlist empty and say so in summary."
+        "You have exactly one tool, providers_search_providers, and your only task is to call it and return its response. "
+        "Your first action must be to call it, once, with the request's location, date_from, date_to and preferences, and "
+        "sleep_seconds set to provider_sleep_seconds from the input. It is slow: that is expected. Do not answer before you "
+        "have its response. Then return its response as your result and nothing else: shortlist is its providers, copied "
+        "exactly with their slots and reasons; considered is its considered count; summary is one short sentence about what "
+        "it returned. Never invent or change a provider or a slot. If it returned no providers, leave shortlist empty and "
+        "say so in summary."
     )
     model: ModelSettings = Field(default_factory=lambda: model_for("researcher"))
     # An MCP server in a container of its own (mcp.py). Its one tool is bound to the model directly (discover=False).

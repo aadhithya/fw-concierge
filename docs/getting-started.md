@@ -21,7 +21,7 @@ http://localhost:16686 (`make traces`).
 | | Demo mode (default) | Live mode |
 |---|---|---|
 | Set | `DEMO_MODE=1` | `DEMO_MODE=0` and `GOOGLE_API_KEY=...` in `.env` |
-| Models | Deterministic, rule-based fakes | `LLM=gemini` (default): Gemini `gemini-3.5-flash-lite`, low thinking. `LLM=gemma`: Gemma `gemma-4-31b-it` |
+| Models | Deterministic, rule-based fakes | `LLM=gemini` (default): Gemini `gemini-3.5-flash-lite`, low thinking. `LLM=gemma`: Gemma `gemma-4-31b-it`, thinking high (it follows tool instructions better) |
 | Needs | Nothing, works offline | A key. **Real calls cost money** |
 | Use it for | Repeatable demos and tests | Seeing real model behaviour |
 
