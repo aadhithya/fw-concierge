@@ -1,4 +1,4 @@
-"""OpenTelemetry setup. Featherweight emits spans through the OTel API (`OTelObserver`); this configures the SDK and exporter."""
+"""OpenTelemetry setup. featherweight emits spans through the OTel API (`OTelObserver`); this configures the SDK and exporter."""
 
 import logging
 

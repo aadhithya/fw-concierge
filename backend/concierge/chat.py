@@ -1,6 +1,6 @@
 """The chat agent: the part of the system the user talks to.
 
-It is a Featherweight `StreamingAgent`. The framework streams its words and its tool calls to the browser as AG-UI events
+It is a featherweight `StreamingAgent`. The framework streams its words and its tool calls to the browser as AG-UI events
 (`runner.stream()` + `agui.encode()`), so nothing here builds events by hand.
 
 The research is a *background agent*: the framework gives the chat a `start_background` tool, checks the typed input

@@ -1,4 +1,4 @@
-// The only way the UI talks to the backend: application-owned HTTP endpoints. No Featherweight internals.
+// The only way the UI talks to the backend: application-owned HTTP endpoints. No featherweight internals.
 export type Slot = { id: string; provider_id: string; starts_at: string; duration_min: number }
 export type Provider = {
   id: string; name: string; neighbourhood: string; description: string; price_band: number

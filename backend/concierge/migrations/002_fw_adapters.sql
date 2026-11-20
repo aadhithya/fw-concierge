@@ -1,5 +1,5 @@
--- The job queue behind Featherweight's `JobQueue` interface. Infrastructure, so it has its own schema: not the app's
--- `app` tables and not Featherweight's own `featherweight` run-log tables.
+-- The job queue behind featherweight's `JobQueue` interface. Infrastructure, so it has its own schema: not the app's
+-- `app` tables and not featherweight's own `featherweight` run-log tables.
 CREATE SCHEMA IF NOT EXISTS fw_adapters;
 
 CREATE TABLE fw_adapters.job_queue (

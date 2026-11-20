@@ -21,11 +21,14 @@ http://localhost:16686 (`make traces`).
 | | Demo mode (default) | Live mode |
 |---|---|---|
 | Set | `DEMO_MODE=1` | `DEMO_MODE=0` and `GOOGLE_API_KEY=...` in `.env` |
-| Models | Deterministic, rule-based fakes | Gemini `gemini-3.5-flash-lite`, low thinking |
+| Models | Deterministic, rule-based fakes | `LLM=gemini` (default): Gemini `gemini-3.5-flash-lite`, low thinking. `LLM=gemma`: Gemma `gemma-4-31b-it` |
 | Needs | Nothing, works offline | A key. **Real calls cost money** |
 | Use it for | Repeatable demos and tests | Seeing real model behaviour |
 
-Run `make up` again after changing `.env`. Live mode has not been exercised in this repository's tests: they never call a real model.
+**Gemma** is free with a Google API key, which makes it handy for trying live mode. featherweight's docs warn that the hosted Gemma
+models may answer in JSON instead of calling a tool when an agent has both tools and a typed output. Here that applies to the
+researcher agent (it has the availability tool) and to the chat agent (it has tools and `start_background`), so expect Gemma to be
+less reliable than Gemini; the other agents have no tools. Run `make up` again after changing `.env`. Live mode has not been exercised in this repository's tests: they never call a real model.
 
 ## Commands
 
