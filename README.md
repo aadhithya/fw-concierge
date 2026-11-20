@@ -1,6 +1,6 @@
 # fw-concierge
 
-A small, production-shaped demo of [Featherweight](https://github.com/aadhithya/featherweight): a chat assistant that finds a
+A small, production-shaped demo of [featherweight](https://github.com/aadhithya/featherweight): a chat assistant that finds a
 physiotherapy appointment in Munich, researches providers on a background worker, and books after an explicit confirmation.
 
 > **Everything is fictional.** The providers, slots and bookings are made up and simulated. Nothing is booked, and nothing here
@@ -20,7 +20,7 @@ for live mode (Gemini `gemini-3.5-flash-lite`, or `LLM=gemma` for the big hosted
 
 ## What it shows
 
-| Featherweight feature | Where |
+| featherweight feature | Where |
 |---|---|
 | A streaming chat agent, streamed over AG-UI | `backend/concierge/chat.py` |
 | A background agent: the chat starts a job and carries on | `Concierge.background_agents` |

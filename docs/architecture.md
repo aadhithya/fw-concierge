@@ -26,20 +26,20 @@ flowchart LR
 | `jaeger` | Trace backend (in memory: traces are lost on restart) |
 
 The API and the worker meet only in Postgres: the queue and the database. The browser talks only to the API's HTTP endpoints and
-the AG-UI stream. It never sees Featherweight's run log, queue or agent classes.
+the AG-UI stream. It never sees featherweight's run log, queue or agent classes.
 
 ## Who owns what
 
-**The application owns its domain data. Featherweight owns agent execution.**
+**The application owns its domain data. featherweight owns agent execution.**
 
 | Schema | Owner | Holds |
 |---|---|---|
-| `app` | The application | `providers`, `availability_slots` (the mock catalogue), `appointment_requests`, `research_results`, `preparations`, `bookings`, `job_progress` (what the UI shows), `demo_settings`, and **`job_results`**, the output store behind Featherweight's `ResultStore` |
+| `app` | The application | `providers`, `availability_slots` (the mock catalogue), `appointment_requests`, `research_results`, `preparations`, `bookings`, `job_progress` (what the UI shows), `demo_settings`, and **`job_results`**, the output store behind featherweight's `ResultStore` |
 | `featherweight` | The framework | The run log: jobs, agent runs (status, tokens, timing, hashes), job events and leases. Created by `PostgresDatabase` |
-| `fw_adapters` | The application, for the framework | `job_queue`, behind Featherweight's `JobQueue` |
+| `fw_adapters` | The application, for the framework | `job_queue`, behind featherweight's `JobQueue` |
 
 `job_results` is application data on purpose: it holds user content, and in a multi-tenant app it would be tenant-scoped, so it
-lives under the app's own retention and access rules. Featherweight keeps metadata only (status, tokens, timing, hashes), never
+lives under the app's own retention and access rules. featherweight keeps metadata only (status, tokens, timing, hashes), never
 inputs or outputs.
 
 Agents never touch these tables. They reach providers and availability only through two interfaces in `domain.py`

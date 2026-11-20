@@ -1,4 +1,4 @@
-"""The Postgres queue and result store, checked with Featherweight's own conformance kits.
+"""The Postgres queue and result store, checked with featherweight's own conformance kits.
 
 They run in a database of their own (`concierge_test`), never the one the running stack uses: the stack's worker would
 take the kit's messages off the queue. Needs the Compose Postgres: `make up`, then `make test`.

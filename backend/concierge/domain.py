@@ -1,6 +1,6 @@
 """The application's domain: models, the service interfaces the agents use, and the Postgres repositories behind them.
 
-Everything here is fictional. Featherweight never sees these tables; agents reach providers and availability only through
+Everything here is fictional. featherweight never sees these tables; agents reach providers and availability only through
 `ProviderCatalog` and `AvailabilityService`, so the mock availability can be replaced without touching the orchestration.
 """
 

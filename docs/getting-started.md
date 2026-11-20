@@ -25,7 +25,7 @@ http://localhost:16686 (`make traces`).
 | Needs | Nothing, works offline | A key. **Real calls cost money** |
 | Use it for | Repeatable demos and tests | Seeing real model behaviour |
 
-**Gemma** is free with a Google API key, which makes it handy for trying live mode. Featherweight's docs warn that the hosted Gemma
+**Gemma** is free with a Google API key, which makes it handy for trying live mode. featherweight's docs warn that the hosted Gemma
 models may answer in JSON instead of calling a tool when an agent has both tools and a typed output. Here that applies to the
 researcher agent (it has the availability tool) and to the chat agent (it has tools and `start_background`), so expect Gemma to be
 less reliable than Gemini; the other agents have no tools. Run `make up` again after changing `.env`. Live mode has not been exercised in this repository's tests: they never call a real model.

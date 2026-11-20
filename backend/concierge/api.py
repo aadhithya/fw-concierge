@@ -1,6 +1,6 @@
 """The web/API process: the chat stream, job status and progress, retry, and booking.
 
-The frontend talks only to these endpoints. It never touches Featherweight's run log, queue or agent classes.
+The frontend talks only to these endpoints. It never touches featherweight's run log, queue or agent classes.
 The API has no worker in it: it submits jobs (inside the chat agent's tool), follows them and reads results.
 """
 
@@ -30,7 +30,7 @@ from featherweight.adapters import agui
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     observers = setup_telemetry("concierge-api")  # OpenTelemetry spans for jobs, agents, model calls and tools
-    async with Database(DATABASE_URL) as app_db, PostgresDatabase(DATABASE_URL) as db:  # the app's data / Featherweight's run log
+    async with Database(DATABASE_URL) as app_db, PostgresDatabase(DATABASE_URL) as db:  # the app's data / featherweight's run log
         results = PostgresResultStore(app_db.pool)
         deps.repo, deps.catalog, deps.availability = Repository(app_db), PgCatalog(app_db), PgAvailability(app_db)
         deps.client = JobClient(db, PostgresQueue(app_db.pool, db), results, observers=observers)
@@ -55,14 +55,14 @@ async def health():
 
 @app.post("/api/agui")
 async def agui_chat(request: Request):
-    """The chat. The client sends the whole conversation; Featherweight keeps none."""
+    """The chat. The client sends the whole conversation; featherweight keeps none."""
     run = deps.runner.stream(Concierge, agui.parse_request(await request.body()))
     return StreamingResponse(agui.encode(run), headers=agui.HEADERS, media_type=agui.CONTENT_TYPE)
 
 
 # ------------------------------------------------------------------------------------------------------------------ jobs
 
-STATES = {  # Featherweight's job status -> the lifecycle the UI shows
+STATES = {  # featherweight's job status -> the lifecycle the UI shows
     RunStatus.INIT: "queued", RunStatus.RUNNING: "running", RunStatus.SUCCESS: "completed",
     RunStatus.FAILED: "failed", RunStatus.CANCELLED: "cancelled",
 }

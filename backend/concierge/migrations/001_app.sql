@@ -1,5 +1,5 @@
 -- Application-owned data: the domain (providers, slots, requests, bookings) and the job results.
--- Featherweight's run log lives in its own schema (`featherweight`) and the queue in `fw_adapters`.
+-- featherweight's run log lives in its own schema (`featherweight`) and the queue in `fw_adapters`.
 CREATE SCHEMA IF NOT EXISTS app;
 
 CREATE TABLE app.providers (
@@ -25,7 +25,7 @@ CREATE TABLE app.availability_slots (
 );
 CREATE INDEX ON app.availability_slots (provider_id, starts_at);
 
--- Everything about one research is keyed by the id of its Featherweight job. The job itself writes the request row first.
+-- Everything about one research is keyed by the id of its featherweight job. The job itself writes the request row first.
 CREATE TABLE app.appointment_requests (
     job_id     text PRIMARY KEY,
     criteria   jsonb NOT NULL,              -- the typed SearchRequest the chat agent extracted
@@ -38,7 +38,7 @@ CREATE TABLE app.research_results (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- Outputs of jobs and agents, behind Featherweight's `ResultStore`. This is application data (it holds user content, and
+-- Outputs of jobs and agents, behind featherweight's `ResultStore`. This is application data (it holds user content, and
 -- in a multi-tenant app it would be tenant-scoped), so it lives here, under the app's own retention and access rules.
 CREATE TABLE app.job_results (
     job_id     text NOT NULL,

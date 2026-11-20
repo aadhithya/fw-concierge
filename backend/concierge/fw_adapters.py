@@ -1,7 +1,7 @@
-"""Postgres implementations of two Featherweight interfaces: `JobQueue` and `ResultStore`.
+"""Postgres implementations of two featherweight interfaces: `JobQueue` and `ResultStore`.
 
-Featherweight ships a Postgres run log but only sqlite/memory queues, and leaves results to you. These two classes are the
-glue that lets API and worker processes share one Postgres. Both pass Featherweight's conformance kits (see tests/).
+featherweight ships a Postgres run log but only sqlite/memory queues, and leaves results to you. These two classes are the
+glue that lets API and worker processes share one Postgres. Both pass featherweight's conformance kits (see tests/).
 """
 
 import asyncio
@@ -113,7 +113,7 @@ class PostgresQueue(JobQueue):
 
 
 class PostgresResultStore(ResultStore):
-    """Job and agent outputs, behind Featherweight's `ResultStore`. Application data: the table is `app.job_results`."""
+    """Job and agent outputs, behind featherweight's `ResultStore`. Application data: the table is `app.job_results`."""
 
     def __init__(self, pool: AsyncConnectionPool):
         self.pool = pool
