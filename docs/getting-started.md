@@ -37,7 +37,9 @@ less reliable than Gemini; the other agents have no tools. Run `make up` again a
 | `make up` | Build and start everything (waits until healthy) |
 | `make down` | Stop the services; the data is kept |
 | `make restart` | Restart the API and the worker |
-| `make logs` | Follow logs (`make logs S=worker` for one service) |
+| `make logs` | Follow the logs of everything, starting with the last 100 lines (`make logs S=worker` for one service) |
+| `make logs-api` | Follow the API logs: requests and the chat |
+| `make logs-worker` | Follow the worker logs: jobs, agent runs, and why an attempt failed |
 | `make ps` | Service status |
 | `make build` | Build the image |
 | `make reset-db` | Wipe the database and start again with fresh seed data |
@@ -75,8 +77,9 @@ In the browser (demo mode), or run `make demo` for the same flow in the terminal
 | Problem | Fix |
 |---|---|
 | `port is already allocated` | Another service uses 8000, 16686 or 5433. Stop it, or change the host port in `compose.yaml` |
-| The page loads but the chat says nothing | `make logs S=api`. In live mode check `GOOGLE_API_KEY` |
-| A research stays `queued` | The worker is not running: `make ps`, `make logs S=worker` |
+| The page loads but the chat says nothing | `make logs-api`. In live mode check `GOOGLE_API_KEY` |
+| A research stays `queued` | The worker is not running: `make ps`, `make logs-worker` |
+| A research fails in live mode | `make logs-worker` shows each failed attempt and its reason. With `LLM=gemma` a model may skip a tool call: see the Gemma note under Modes |
 | Slots look old or all taken | `make reset-db` reseeds the next 14 days of slots |
 | `make test` cannot connect | Run `make up` first: the tests use the Postgres on `localhost:5433` and make their own `concierge_test` database |
 | Stale build after a change | `make build`, then `make up` |
