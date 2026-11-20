@@ -141,7 +141,9 @@ are named after the fake (`chat demo-rules`); Jaeger keeps traces in memory only
 
 Vite, React, [assistant-ui](https://www.assistant-ui.com) and shadcn, **dark only** (no light theme, no toggle). assistant-ui's
 `useAgUiRuntime` consumes the AG-UI stream directly, so there is no adapter layer. The chat on the left shows only words: its tool calls
-are hidden. The right-hand pane holds the research card and the booking flow. The card comes from featherweight's
+are hidden. The right-hand pane does not scroll itself: the research cards (collapsible, newest first and open, older ones collapse; Retry
+adds a new card) and the booking flow each scroll inside their own area, and the demo controls are pinned to the bottom. The researches
+of this browser are remembered in `localStorage` (the last 8) and restored after a refresh. The card comes from featherweight's
 **`background_started`** event, which `App.tsx` subscribes to (`agent.subscribe({ onCustomEvent })`): it carries the job id and is emitted by
 the framework whatever the model. (An earlier version rendered the card from the `start_background` tool call. That broke on Gemma,
 whose streamed tool calls did not reach the browser as tool-call events, so no card appeared.) The booking pane (`BookingPane.tsx`)

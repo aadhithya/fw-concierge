@@ -72,7 +72,7 @@ In the browser (demo mode), or run `make demo` for the same flow in the terminal
 6. **Retry:** turn the control off and click **Retry**. This *resumes* the job: the log says "Briefing reused from the earlier
    attempt", only the second agent runs, and it completes.
 7. **Confirm:** read the confirmation text and click **Confirm booking**. You get a booking reference, labelled simulated.
-8. **Refresh the page.** The right-hand pane shows the last research and its booking, loaded from the API.
+8. **Refresh the page.** The right-hand pane shows your recent researches (collapsed, the newest open) and any booking, loaded from the API.
 9. **Look at the trace:** `make traces`, service `concierge-api`. One trace runs from the API request through the chat's
    `start_background` tool call into the worker's job, its agent and the MCP call.
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -12,9 +13,11 @@ const STATE_STYLE: Record<Job['state'], string> = {
   failed: 'bg-red-600/80 text-white', cancelled: 'bg-zinc-700 text-zinc-100',
 }
 
-/** One research job: its interpreted criteria, live progress, the shortlist, and the explicit booking step. */
-export function ResearchCard({ jobId: initialJobId, onJob, wake = false }: { jobId: string; onJob?: (id: string) => void; wake?: boolean }) {
-  const [jobId, setJobId] = useState(initialJobId)
+/** One research job: its interpreted criteria, live progress and the shortlist. The card collapses to one line; the newest one is
+ *  open, and when a newer research arrives the older cards collapse. Retry starts a new research, which gets a card of its own. */
+export function ResearchCard({ jobId, wake = false, newest = false, onRetry }: { jobId: string; wake?: boolean; newest?: boolean; onRetry?: (newJobId: string) => void }) {
+  const [open, setOpen] = useState(newest)
+  useEffect(() => { if (!newest) setOpen(false) }, [newest])
   const [job, setJob] = useState<Job | null>(null)
   const { selection, select } = useSelection()
   const { controls } = useControls()
@@ -26,27 +29,37 @@ export function ResearchCard({ jobId: initialJobId, onJob, wake = false }: { job
 
   // The job state comes from the API, so a refresh (or a new browser) shows the same thing. The SSE stream only says "something changed".
   useEffect(() => {
-    onJob?.(jobId)
     refresh()
     const events = new EventSource(`/api/jobs/${jobId}/stream`)
     events.addEventListener('progress', refresh)
     events.addEventListener('state', refresh)
     events.onerror = () => events.close() // the stream ends when the job is final
     return () => events.close()
-  }, [jobId, refresh, onJob])
+  }, [jobId, refresh])
 
   if (error) return <Card className="my-3"><CardContent className="pt-4 text-red-400">{error}</CardContent></Card>
   if (!job) return <Card className="my-3"><CardContent className="pt-4 text-muted-foreground">Loading research…</CardContent></Card>
 
   const confirmed = job.booking // a booking made earlier (this also restores it after a refresh)
-  const retry = async () => { setJobId((await retryJob(jobId, controls.sleepSeconds)).job_id); setJob(null) }
+  const retry = async () => onRetry?.((await retryJob(jobId, controls.sleepSeconds)).job_id)
   return (
     <Card className="my-3 w-full">
-      <CardHeader className="flex-row items-center justify-between gap-2">
-        <CardTitle className="text-base">Research <span className="font-mono text-xs text-muted-foreground">{job.job_id.slice(0, 8)}</span></CardTitle>
-        <Badge className={STATE_STYLE[job.state]}>{job.state}</Badge>
+      <CardHeader className="gap-1">
+        <button type="button" className="flex w-full items-center justify-between gap-2 text-left" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+          <CardTitle className="flex items-center gap-1 text-base">
+            {open ? <ChevronDownIcon className="size-4" /> : <ChevronRightIcon className="size-4" />}
+            Research <span className="font-mono text-xs text-muted-foreground">{job.job_id.slice(0, 8)}</span>
+          </CardTitle>
+          <Badge className={STATE_STYLE[job.state]}>{job.state}</Badge>
+        </button>
+        {!open && job.criteria && (
+          <div className="truncate pl-5 text-xs text-muted-foreground">
+            {job.criteria.location} · {job.criteria.date_from}{job.criteria.preferences.length > 0 && ` · ${job.criteria.preferences.join(', ')}`}
+            {job.result && ` · ${job.result.shortlist.length} found`}
+          </div>
+        )}
       </CardHeader>
-      <CardContent className="space-y-4 text-sm">
+      {open && <CardContent className="space-y-4 text-sm">
         {job.criteria && (
           <div>
             <div className="mb-1 font-medium">How I read your request</div>
@@ -98,7 +111,7 @@ export function ResearchCard({ jobId: initialJobId, onJob, wake = false }: { job
           </div>
         )}
 
-      </CardContent>
+      </CardContent>}
     </Card>
   )
 }
