@@ -1,0 +1,64 @@
+# Appointment Concierge. One image serves the API and runs the worker; Postgres and Jaeger are the only other services.
+x-app: &app
+  build: .
+  env_file:
+    - path: .env
+      required: false
+  environment: &env
+    DATABASE_URL: postgresql://concierge:concierge@postgres:5432/concierge
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+    DEMO_MODE: ${DEMO_MODE:-1}
+    GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: concierge
+      POSTGRES_PASSWORD: concierge
+      POSTGRES_DB: concierge
+    ports:
+      - "127.0.0.1:5433:5432"  # host port 5433 (5432 is often taken); for tests and psql from the host
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U concierge"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  migrate:  # one-shot: schema + seed, then exits
+    <<: *app
+    command: python -m concierge.migrate
+    restart: "no"
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    <<: *app
+    command: uvicorn concierge.api:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      jaeger: { condition: service_started }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/api/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    <<: *app
+    command: python -m concierge.worker
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      jaeger: { condition: service_started }
+
+  jaeger:  # trace backend (in-memory: traces are lost on restart)
+    image: jaegertracing/jaeger:2.11.0
+    ports:
+      - "16686:16686"
+
+volumes:
+  pgdata:
