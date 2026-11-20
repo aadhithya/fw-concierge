@@ -8,6 +8,7 @@ x-app: &app
     DATABASE_URL: postgresql://concierge:concierge@postgres:5432/concierge
     OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     DEMO_MODE: ${DEMO_MODE:-1}
+    LLM: ${LLM:-gemini}
     GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
 
 services:

@@ -1,11 +1,12 @@
-"""Which model an agent runs on. Live mode: Gemini flash-lite, nothing else. Demo mode: a deterministic offline fake."""
+"""Which model an agent runs on. Demo mode: a deterministic offline fake. Live mode: Gemini flash-lite (default), or the
+big hosted Gemma with LLM=gemma. Both use GOOGLE_API_KEY."""
 
 from typing import Any, ClassVar
 
 from pydantic import Field
 
-from concierge.config import DEMO_MODE
-from featherweight import Gemini, ModelSettings
+from concierge.config import DEMO_MODE, LLM
+from featherweight import Gemini, Gemma, ModelSettings
 
 
 class DemoSettings(ModelSettings):
@@ -23,4 +24,8 @@ class DemoSettings(ModelSettings):
 
 
 def model_for(role: str) -> ModelSettings:
-    return DemoSettings(role=role) if DEMO_MODE else Gemini(model="gemini-3.5-flash-lite", thinking="low")
+    if DEMO_MODE:
+        return DemoSettings(role=role)
+    if LLM == "gemma":
+        return Gemma(model="gemma-4-31b-it", thinking="minimal")  # thinking: "minimal" (off) or "high"
+    return Gemini(model="gemini-3.5-flash-lite", thinking="low")
