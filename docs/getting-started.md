@@ -26,9 +26,9 @@ http://localhost:16686 (`make traces`).
 | Use it for | Repeatable demos and tests | Seeing real model behaviour |
 
 **Gemma** is free with a Google API key, which makes it handy for trying live mode. featherweight's docs warn that the hosted Gemma
-models may answer in JSON instead of calling a tool when an agent has both tools and a typed output. Here that applies to the
-researcher agent (it has the availability tool) and to the chat agent (it has tools and `start_background`), so expect Gemma to be
-less reliable than Gemini; the other agents have no tools. Run `make up` again after changing `.env`. Live mode has not been exercised in this repository's tests: they never call a real model.
+models may answer in JSON instead of calling a tool when an agent has both tools and a typed output. Here the research agent has one
+MCP tool, but nothing depends on it: if Gemma skips the call, the research still succeeds, just without the network answer. The chat
+agent has tools too, and Gemma has called them correctly there. Run `make up` again after changing `.env`. Live mode has not been exercised in this repository's tests: they never call a real model.
 
 ## Commands
 
@@ -50,8 +50,9 @@ less reliable than Gemini; the other agents have no tools. Run `make up` again a
 
 ## Environment variables
 
-`.env.example` lists them: `DEMO_MODE` and `GOOGLE_API_KEY`. Compose sets the database URL and the OTLP endpoint itself. No real
-credentials are ever committed.
+`.env.example` lists them: `DEMO_MODE`, `LLM`, `GOOGLE_API_KEY` and `TRACE_CONTENT`. `TRACE_CONTENT=SPAN_ONLY` records the messages, tool
+arguments and results on the Jaeger spans, which is handy for seeing what a model actually did; it holds whatever users typed, so it is
+off by default. Compose sets the database URL, the OTLP endpoint and the MCP service URL itself. No real credentials are ever committed.
 
 ## Demo walkthrough
 
@@ -59,18 +60,21 @@ In the browser (demo mode), or run `make demo` for the same flow in the terminal
 
 1. **Ask for something vague:** "I need a physio soon". The assistant asks which area. It does not invent a location or dates.
 2. **Complete it:** "Back pain, evening appointments in Haidhausen next week". The assistant tells you what it understood, and a
-   **research card** appears in the chat: the interpreted criteria, then live progress lines as the worker runs the job.
+   **research card** appears in the right-hand pane: the interpreted criteria, then live progress lines as the worker runs the job
+   (about 5 seconds: the research agent calls the MCP provider service, which is deliberately slow). When it ends, the chat tells you
+   how it went without being asked.
 3. **Read the shortlist:** providers with the model's reasons and open slots. Provider and slot data are read from the catalogue,
    and only the reasons are model-written.
 4. **Pick a slot.** The right half shows the slot on a week calendar. Nothing is booked yet.
-5. **Show the failure path:** turn on **Simulate outage in booking preparation** (top right), then click **Prepare booking**. The
-   job runs its first agent, then fails; the status shows `failed`.
-6. **Retry:** turn the switch off and click **Retry**. This *resumes* the job: the log says "Briefing reused from the earlier
+5. **Show the failure path:** in **Demo controls** (bottom of the right-hand pane) turn on **Fail the booking preparation**, then click
+   **Prepare booking**. The job runs its first agent, then fails; the status shows `failed`. (The same card has a slider for how long
+   the MCP provider service takes, 0–20 seconds, which applies to the next research.)
+6. **Retry:** turn the control off and click **Retry**. This *resumes* the job: the log says "Briefing reused from the earlier
    attempt", only the second agent runs, and it completes.
 7. **Confirm:** read the confirmation text and click **Confirm booking**. You get a booking reference, labelled simulated.
-8. **Refresh the page**, then click **Last research**. The research and the booking are loaded from the API.
+8. **Refresh the page.** The right-hand pane shows the last research and its booking, loaded from the API.
 9. **Look at the trace:** `make traces`, service `concierge-api`. One trace runs from the API request through the chat's
-   `start_background` tool call into the worker's job and its agents.
+   `start_background` tool call into the worker's job, its agent and the MCP call.
 
 ## Troubleshooting
 
