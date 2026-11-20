@@ -8,6 +8,8 @@ physiotherapy appointment in Munich, researches providers on a background worker
 
 You talk to the assistant on the left; the booking flow is on the right.
 
+![fw-concierge: the chat with a research shortlist on the left, the booking pane on the right](docs/screenshot.png)
+
 ```
 make up        # build and start everything, then open http://localhost:8000
 make demo      # a scripted walkthrough of the whole flow, in the terminal
