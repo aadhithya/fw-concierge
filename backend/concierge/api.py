@@ -6,6 +6,7 @@ The API has no worker in it: it submits jobs (inside the chat agent's tool), fol
 
 import asyncio
 import json
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from concierge.domain import Database, PgAvailability, PgCatalog, Repository, Se
 from concierge.fw_adapters import PostgresQueue, PostgresResultStore
 from concierge.booking_prep import PrepareInput, prepare_booking
 from concierge.research import research_providers
+from concierge.wake import FINAL, wake_text
 from concierge.telemetry import setup as setup_telemetry
 from featherweight import AgentRunner, BadRequest, JobClient, PostgresDatabase, RunStatus
 from featherweight.adapters import agui
@@ -77,6 +79,12 @@ async def job_view(job_id: str) -> dict:
     criteria = await deps.repo.get_request(job_id)
     state = STATES[row.status]
     booking = await deps.repo.booking_for_job(job_id)
+    wake = None
+    if state in FINAL:  # what the chat must hear about this ending (see wake.py); the browser sends it as the next turn
+        try:
+            wake = await wake_text(job_id, state)
+        except Exception:  # never let this break the job view: the card still shows the state
+            logging.getLogger("api").warning("could not build the wake message for %s", job_id, exc_info=True)
     return {
         "job_id": job_id,
         "state": state,
@@ -85,6 +93,7 @@ async def job_view(job_id: str) -> dict:
         "result": await deps.repo.get_result(job_id) if state == "completed" else None,
         "booking": await booking_view(booking) if booking else None,
         "progress": [{"seq": p["seq"], "message": p["message"]} for p in await deps.repo.progress(job_id)],
+        "wake": wake,
     }
 
 

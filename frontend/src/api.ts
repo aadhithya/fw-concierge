@@ -18,6 +18,7 @@ export type Job = {
   result: { summary: string; considered: number; shortlist: ShortlistItem[] } | null
   booking: Booking | null
   progress: { seq: number; message: string }[]
+  wake: string | null // once the job is final: the message the chat should be told (built by the server)
 }
 
 async function call<T>(url: string, init?: RequestInit): Promise<T> {

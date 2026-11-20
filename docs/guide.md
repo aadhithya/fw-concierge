@@ -14,6 +14,26 @@ missing or invalid is refused with a message the model reads, and the model asks
 submits the job to the queue and returns the job id at once, and the stream carries a `background_started` event. The chat does not
 wait for the job.
 
+### Waking the chat (`wake.py`, `frontend/src/wake.ts`)
+
+The chat turn ends as soon as the research is started, and the job finishes seconds later, after the stream has closed.
+featherweight emits `background_finished` only while the stream is open, and it **wakes nothing**: delivering the outcome to the chat
+is the application's job (the "session that wakes itself" in the featherweight guide). Here it works like this:
+
+1. The job response (`GET /api/jobs/{id}`) carries a `wake` field once the job is final. The server builds it:
+   `runner.background_message(job_id)` (featherweight's message, with the job's status and output) plus, for a failure, the
+   job's own progress notes. featherweight gives a failed child's status and error type but never the error text, so the notes
+   are how the chat can say *what* went wrong.
+2. The research card in the live conversation sees `wake`, and once the chat is idle it appends the message as the next user turn.
+   assistant-ui posts the whole conversation to `/api/agui` as usual.
+3. The concierge's prompt tells it how to treat a message that starts with `<background_result>`: summarise a success, report a
+   failure and point to Retry. The thread shows a one-line notice instead of the raw message.
+
+Guards, so it stays robust: only a card in the live thread wakes the chat (a card restored after a refresh, from "Last research",
+never does); each job wakes the chat once (in memory and in `localStorage`, marked just before the message is appended); the
+wake waits while the chat is running; and a failure to build the message never breaks the job view. A retried research is a new
+job, so it wakes the chat again when it ends.
+
 ## The research job (`research.py`)
 
 `research_providers` is plain async Python, started by a worker:
@@ -107,7 +127,8 @@ it renders the `start_background` tool call as the research card and hides the c
 
 - Fictional providers and simulated bookings only. No authentication, payments, notifications, rescheduling or cancellation.
 - Slot times are stored as UTC and read as Munich local time. The slots are a rolling 14 days, topped up on every start.
-- The conversation is not stored: a refresh restores the last research and its booking from the API, not the chat text.
+- The conversation is not stored: a refresh restores the last research and its booking from the API, not the chat text. For the same
+  reason the chat is only woken while the page is open: with no conversation to continue, there is nothing to wake.
 - The outage switch is global, not per user. Job progress reaches the stream by polling the database every half second.
 - Live mode (Gemini) is untested here: the tests never call a real model, and the research fans out one call per provider at once
   without any rate-limit tuning.

@@ -35,7 +35,12 @@ class Concierge(StreamingAgent):
         "and a date window, plus any preferences. Use current_date to resolve relative dates. If the location or the dates are "
         "missing or unclear, ask ONE short question and wait: never guess. When you have both, start the research with "
         "start_background, then tell the user briefly what you understood and that the research has started. You cannot "
-        "book: booking happens on the confirmation screen. Medical advice is out of scope."
+        "book: booking happens on the confirmation screen. Medical advice is out of scope. "
+        "Later, a user message that starts with <background_result> is not typed by the user: it is the outcome of the research "
+        "you started, sent by the application. If its status is SUCCESS, tell the user in two or three sentences which options "
+        "came out on top (names, area, why) and that they can pick a slot in the booking pane; use only what the result says. "
+        "If it is FAILED or CANCELLED, say plainly that the research failed, say what the progress notes report, and tell the "
+        "user to press Retry on the research card. Do not start the research again yourself, and never invent providers or slots."
     )
     model: ModelSettings = Field(default_factory=lambda: model_for("chat"))
     tools: list = [current_date]

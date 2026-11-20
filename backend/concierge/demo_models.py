@@ -66,13 +66,37 @@ def intake(text: str, today: date) -> tuple[dict, list[str]]:
     return args, questions
 
 
+def _is_wake(message) -> bool:
+    """The application's message that tells the chat how its research ended (not typed by the user)."""
+    return message.type == "human" and str(message.content).startswith("<background_result")
+
+
+def wake_reply(text: str) -> str:
+    """The demo concierge's answer to the outcome of its research."""
+    status = (re.search(r'status="(\w+)"', text) or [None, "FAILED"])[1]
+    if status == "SUCCESS":
+        result = json.loads(text[text.index("{") : text.rindex("}") + 1])
+        # the framework wraps the job's output; accept it either wrapped or bare
+        shortlist = (result.get("output") or result).get("shortlist", [])
+        if not shortlist:
+            return "The research finished, but nothing suitable came up. Try a wider area or different dates."
+        names = ", ".join(f"{i['provider']['name']} ({i['provider']['neighbourhood']})" for i in shortlist[:3])
+        return f"The research finished. Top options: {names}. Pick a slot in the booking pane and I'll help you prepare it."
+    notes = [line[2:] for line in text.splitlines() if line.startswith("- ")]
+    detail = f" The job reported: {'; '.join(notes[-2:])}." if notes else ""
+    return f"The research failed.{detail} Press Retry on the research card to run it again."
+
+
 def chat(messages) -> AIMessage:
     """The demo concierge: asks one question, or starts the research with `start_background`, then confirms. Only the
-    conversation after the last started research counts, as a real model would treat it."""
+    conversation after the last started research or research outcome counts, as a real model would treat it."""
+    if _is_wake(messages[-1]):
+        return AIMessage(content=wake_reply(str(messages[-1].content)))
     last_tool = max((i for i, m in enumerate(messages) if m.type == "tool"), default=-1)
+    last_wake = max((i for i, m in enumerate(messages) if _is_wake(m)), default=-1)
     if messages[-1].type == "tool":
         try:
-            started = json.loads(str(messages[-1].content))["job_id"]
+            json.loads(str(messages[-1].content))["job_id"]
         except (ValueError, KeyError, TypeError):  # the framework refused the input: say so, and ask again
             return AIMessage(content="Sorry, I couldn't use that. Could you tell me the area and the dates again?")
         call = next(m for m in reversed(messages) if m.type == "ai" and m.tool_calls).tool_calls[0]["args"]
@@ -80,7 +104,7 @@ def chat(messages) -> AIMessage:
         prefs = f" Preferences: {', '.join(done['preferences'])}." if done["preferences"] else ""
         when = done["date_from"] if done["date_from"] == done["date_to"] else f"{done['date_from']} to {done['date_to']}"
         return AIMessage(content=f"Here is what I understood: physiotherapy in {done['location']}, {when}.{prefs} I've started the research.")
-    text = " ".join(str(m.content) for m in messages[last_tool + 1 :] if m.type == "human")
+    text = " ".join(str(m.content) for m in messages[max(last_tool, last_wake) + 1 :] if m.type == "human" and not _is_wake(m))
     args, questions = intake(text, date.today())
     if questions:
         return AIMessage(content=questions[0])  # one focused question at a time

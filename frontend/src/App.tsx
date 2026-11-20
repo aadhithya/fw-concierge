@@ -23,7 +23,7 @@ function ToolCall({ toolName, result }: ToolCallMessagePartProps) {
   if (toolName !== 'start_background') return null
   const started = typeof result === 'string' ? safeJson(result) : result
   if (!started?.job_id) return <div className="my-2 text-sm text-muted-foreground">Starting the research…</div>
-  return <ResearchCard jobId={started.job_id} onJob={remember} />
+  return <ResearchCard jobId={started.job_id} onJob={remember} wake />
 }
 // The thread folds tool calls into a collapsed "N tool calls" group by default. The research card must stay visible.
 const PlainGroup = ({ children }: { children?: ReactNode }) => <>{children}</>

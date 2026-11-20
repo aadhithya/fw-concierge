@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { getJob, retryJob, when, type Booking, type Job } from './api'
 import { useSelection } from './selection'
+import { useWake } from './wake'
 
 const STATE_STYLE: Record<Job['state'], string> = {
   queued: 'bg-zinc-700 text-zinc-100', running: 'bg-blue-600/80 text-white', completed: 'bg-emerald-600/80 text-white',
@@ -11,11 +12,13 @@ const STATE_STYLE: Record<Job['state'], string> = {
 }
 
 /** One research job: its interpreted criteria, live progress, the shortlist, and the explicit booking step. */
-export function ResearchCard({ jobId: initialJobId, onJob }: { jobId: string; onJob?: (id: string) => void }) {
+export function ResearchCard({ jobId: initialJobId, onJob, wake = false }: { jobId: string; onJob?: (id: string) => void; wake?: boolean }) {
   const [jobId, setJobId] = useState(initialJobId)
   const [job, setJob] = useState<Job | null>(null)
   const { selection, select } = useSelection()
   const [error, setError] = useState<string | null>(null)
+
+  useWake(jobId, job?.wake ?? null, wake) // tells the chat how this research ended (live conversation only)
 
   const refresh = useCallback(() => getJob(jobId).then(setJob).catch((e) => setError(String(e.message))), [jobId])
 
