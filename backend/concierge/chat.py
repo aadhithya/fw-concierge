@@ -3,20 +3,20 @@
 It is a featherweight `StreamingAgent`. The framework streams its words and its tool calls to the browser as AG-UI events
 (`runner.stream()` + `agui.encode()`), so nothing here builds events by hand.
 
-The research is a *background agent*: the framework gives the chat a `start_background` tool, checks the typed input
+The research is a *background job*: the framework gives the chat a `start_background` tool, checks the typed input
 against the job's schema (`SearchRequest`: a missing or invalid value is refused with a message the model reads, and it asks
 the user), submits the job to the queue, and returns the job id at once. A worker runs the job; the chat does not wait.
 """
 
 from datetime import date
 
+from featherweight import ModelSettings, StreamingAgent
 from langchain_core.tools import tool
 from pydantic import Field
 
 from concierge.domain import NEIGHBOURHOODS, REGION
 from concierge.models import model_for
 from concierge.research import Researcher
-from featherweight import ModelSettings, StreamingAgent
 
 
 @tool
@@ -43,5 +43,6 @@ class Concierge(StreamingAgent):
         "user to press Retry on the research card. Do not start the research again yourself, and never invent providers or slots."
     )
     model: ModelSettings = Field(default_factory=lambda: model_for("chat"))
+    max_attachments = 0  # text only: featherweight accepts files by default, and would send them to the model's provider
     tools: list = [current_date]
-    background_agents: list[type] = [Researcher]  # an agent class: started in the background, run by a worker
+    background_jobs: list[type] = [Researcher]  # an agent class: started in the background, run by a worker

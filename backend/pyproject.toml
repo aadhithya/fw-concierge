@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "fw-concierge: a featherweight showcase (fictional, simulated bookings)"
 requires-python = ">=3.12"
 dependencies = [
-    "featherweight[mcp,postgres,otel]>=0.1.0",
+    "featherweight[mcp,postgres,otel]>=0.2.0,<0.3",
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "psycopg-pool>=3.2",
@@ -14,7 +14,14 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=0.24", "httpx>=0.28"]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "httpx>=0.28", "ruff>=0.8"]
+
+[tool.ruff]
+line-length = 130
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]  # the formatter keeps code within the line length; long prompt strings are fine
 
 [build-system]
 requires = ["hatchling"]
@@ -22,6 +29,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["concierge"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["concierge", "tests"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

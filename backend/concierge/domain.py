@@ -180,7 +180,9 @@ class Repository:
 
     async def get_request(self, job_id: str) -> dict | None:
         async with self.db.pool.connection() as conn:
-            row = await (await conn.execute("SELECT criteria FROM app.appointment_requests WHERE job_id = %s", (job_id,))).fetchone()
+            row = await (
+                await conn.execute("SELECT criteria FROM app.appointment_requests WHERE job_id = %s", (job_id,))
+            ).fetchone()
         return row["criteria"] if row else None
 
     async def add_progress(self, job_id: str, message: str) -> None:

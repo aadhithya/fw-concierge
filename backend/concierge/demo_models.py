@@ -15,12 +15,30 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from concierge.domain import NEIGHBOURHOODS, REGION, Provider, match_preferences
 
 PREFERENCE_WORDS = {  # words in a request -> a preference phrase the providers can match
-    "back": "back pain", "neck": "neck pain", "knee": "knee", "shoulder": "shoulder", "sciatica": "sciatica",
-    "sport": "sports injury", "running": "running", "post-surgery": "post-surgery", "surgery": "post-surgery",
-    "child": "paediatric", "kid": "paediatric", "pregnan": "pregnancy", "posture": "posture", "ankle": "ankle",
-    "evening": "evening", "after work": "evening", "weekend": "weekend", "home visit": "home visit", "at home": "home visit",
-    "wheelchair": "accessible", "accessible": "accessible",
+    "back": "back pain",
+    "neck": "neck pain",
+    "knee": "knee",
+    "shoulder": "shoulder",
+    "sciatica": "sciatica",
+    "sport": "sports injury",
+    "running": "running",
+    "post-surgery": "post-surgery",
+    "surgery": "post-surgery",
+    "child": "paediatric",
+    "kid": "paediatric",
+    "pregnan": "pregnancy",
+    "posture": "posture",
+    "ankle": "ankle",
+    "evening": "evening",
+    "after work": "evening",
+    "weekend": "weekend",
+    "home visit": "home visit",
+    "at home": "home visit",
+    "wheelchair": "accessible",
+    "accessible": "accessible",
 }
+
+
 def _window(text: str, today: date) -> tuple[date, date] | None:
     if m := re.search(r"\b(\d{4}-\d{2}-\d{2})\b", text):
         d = date.fromisoformat(m.group(1))
@@ -47,7 +65,10 @@ def intake(text: str, today: date) -> tuple[dict, list[str]]:
     text = text.lower()
     args: dict = {"preferences": []}
     questions = []
-    place = next((n for n in NEIGHBOURHOODS if n.lower() in text), REGION if REGION.lower() in text or "münchen" in text or "anywhere" in text else None)
+    place = next(
+        (n for n in NEIGHBOURHOODS if n.lower() in text),
+        REGION if REGION.lower() in text or "münchen" in text or "anywhere" in text else None,
+    )
     if place:
         args["location"] = place
     else:
@@ -100,7 +121,9 @@ def chat(messages) -> AIMessage:
         done = json.loads(call["input_json"])
         prefs = f" Preferences: {', '.join(done['preferences'])}." if done["preferences"] else ""
         when = done["date_from"] if done["date_from"] == done["date_to"] else f"{done['date_from']} to {done['date_to']}"
-        return AIMessage(content=f"Here is what I understood: physiotherapy in {done['location']}, {when}.{prefs} I've started the research.")
+        return AIMessage(
+            content=f"Here is what I understood: physiotherapy in {done['location']}, {when}.{prefs} I've started the research."
+        )
     text = " ".join(str(m.content) for m in messages[max(last_tool, last_wake) + 1 :] if m.type == "human" and not _is_wake(m))
     args, questions = intake(text, date.today())
     if questions:
@@ -124,7 +147,9 @@ def write_confirmation(inp: dict) -> dict:
     prov, slot, brief_ = inp["provider"], inp["slot"], inp["briefing"]
     when = datetime.fromisoformat(slot["starts_at"]).strftime("%a %d %b at %H:%M")
     note = brief_["matches"][0] if brief_["matches"] else "an open slot"
-    return {"text": f"{prov['name']} in {prov['neighbourhood']}, {when} ({slot['duration_min']} minutes): {note}. This is a simulated booking; nothing real is reserved."}
+    return {
+        "text": f"{prov['name']} in {prov['neighbourhood']}, {when} ({slot['duration_min']} minutes): {note}. This is a simulated booking; nothing real is reserved."
+    }
 
 
 def _text(content) -> str:
@@ -153,14 +178,24 @@ class RuleModel(BaseChatModel):
         if self.role == "researcher":
             tool_msg = next((m for m in reversed(messages) if m.type == "tool"), None)
             if tool_msg is None:  # call the one tool, as the prompt says
-                name, args = "providers_search_providers", {
-                    "location": inp["location"], "date_from": inp["date_from"], "date_to": inp["date_to"],
-                    "preferences": inp["preferences"], "sleep_seconds": inp["provider_sleep_seconds"],
-                }
+                name, args = (
+                    "providers_search_providers",
+                    {
+                        "location": inp["location"],
+                        "date_from": inp["date_from"],
+                        "date_to": inp["date_to"],
+                        "preferences": inp["preferences"],
+                        "sleep_seconds": inp["provider_sleep_seconds"],
+                    },
+                )
             else:  # forward what it returned
                 data = json.loads(_text(tool_msg.content))
                 found = data["providers"]
-                summary = f"Found {len(found)} of {data['considered']} providers with open slots." if found else "No provider matches this request."
+                summary = (
+                    f"Found {len(found)} of {data['considered']} providers with open slots."
+                    if found
+                    else "No provider matches this request."
+                )
                 name, args = "ResearchResult", {"shortlist": found, "considered": data["considered"], "summary": summary}
         elif self.role == "briefer":
             name, args = "Briefing", brief(inp)

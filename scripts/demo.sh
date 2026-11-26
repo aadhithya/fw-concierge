@@ -22,7 +22,7 @@ curl -s "$API/api/jobs/$RESEARCH" > /tmp/demo-job.json
 json "'criteria: ' + str(d['criteria'])" < /tmp/demo-job.json
 json "'\n'.join('  ' + p['message'] for p in d['progress'])" < /tmp/demo-job.json
 
-step "3. The shortlist: verified providers and slots, with model-written reasons"
+step "3. The shortlist: providers and slots, as the provider service returned them"
 json "'\n'.join(f\"  {i['rank']}. {i['provider']['name']} ({i['provider']['neighbourhood']}): {' '.join(i['reasons'])}\n     slots: {', '.join(s['starts_at'][:16] for s in i['slots'])}\" for i in d['result']['shortlist'])" < /tmp/demo-job.json
 PROVIDER=$(json "d['result']['shortlist'][0]['provider']['id']" < /tmp/demo-job.json)
 SLOT=$(json "d['result']['shortlist'][0]['slots'][0]['id']" < /tmp/demo-job.json)

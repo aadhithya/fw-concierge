@@ -44,7 +44,7 @@ function Concierge() {
     if (isLive) setLive((current) => new Set(current).add(jobId))
   }
 
-  // featherweight emits `background_started` (with the job id) on the chat stream when the chat starts a background agent.
+  // featherweight emits `background_started` (with the job id) on the chat stream when the chat starts a background job.
   useEffect(() => {
     const subscription = agent.subscribe({
       onCustomEvent: ({ event }) => {

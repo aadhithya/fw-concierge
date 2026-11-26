@@ -8,12 +8,12 @@ only the second agent runs again. Booking itself is not here: it stays a plain a
 
 from typing import ClassVar
 
+from featherweight import AgentBase, AgentInput, AgentOutput, JobContext, ModelSettings, Status, job
 from pydantic import BaseModel, Field
 
 from concierge import deps
 from concierge.domain import Provider, SearchRequest, Slot
 from concierge.models import model_for
-from featherweight import AgentBase, AgentInput, AgentOutput, JobContext, ModelSettings, RunStatus, job
 
 
 class PrepareInput(BaseModel):
@@ -115,7 +115,7 @@ async def prepare_booking(ctx: JobContext, input: PrepareInput) -> Preparation:
 
     await note("Checking the provider and slot against your request")
     briefing = await ctx.run(BookingBriefer, BriefInput(request=request, provider=provider, slot=slot))
-    if briefing.status != RunStatus.SUCCESS:
+    if briefing.status != Status.SUCCESS:
         raise PreparationFailed("could not brief the choice")
     # `reused` is true when this is a resumed job and this step had already succeeded: nothing was run again.
     await note("Briefing reused from the earlier attempt" if briefing.reused else "Briefing ready")
@@ -126,7 +126,7 @@ async def prepare_booking(ctx: JobContext, input: PrepareInput) -> Preparation:
 
     await note("Writing the confirmation")
     written = await ctx.run(ConfirmationWriter, ConfirmInput(provider=provider, slot=slot, briefing=briefing.output))
-    if written.status != RunStatus.SUCCESS:
+    if written.status != Status.SUCCESS:
         raise PreparationFailed("could not write the confirmation")
 
     result = Preparation(provider=provider, slot=slot, briefing=briefing.output, confirmation=written.output.text)

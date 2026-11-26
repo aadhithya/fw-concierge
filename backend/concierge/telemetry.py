@@ -2,6 +2,7 @@
 
 import logging
 
+from featherweight import OTelObserver
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
@@ -9,7 +10,6 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 from concierge.config import OTLP_ENDPOINT
-from featherweight import OTelObserver
 
 log = logging.getLogger(__name__)
 

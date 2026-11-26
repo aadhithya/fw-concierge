@@ -1,21 +1,21 @@
 """One end-to-end smoke test of the demo flow, in-process, on the fake models (DEMO_MODE=1, the default). No real model call.
 
-The chat starts the research as a background agent, a worker runs it, a resumable two-agent job fails after its first agent
+The chat starts the research as a background job, a worker runs it, a resumable two-agent job fails after its first agent
 and resumes, and booking is idempotent. Runs in its own database (`concierge_test`), like test_adapters.py.
 """
 
 import pytest
+from featherweight import ChatInput
 from langchain_core.messages import HumanMessage
 
 from concierge import deps
 from concierge.booking_prep import PrepareInput, prepare_booking
 from concierge.chat import Concierge
 from concierge.research import Researcher
-from featherweight import ChatInput
 
 
 async def test_demo_flow(stack):
-    # 1. The chat asks when something is missing, and starts the research (a background agent) when it has everything.
+    # 1. The chat asks when something is missing, and starts the research (a background job) when it has everything.
     async def say(text):
         return [e async for e in deps.runner.stream(Concierge, ChatInput.from_langchain([HumanMessage(text)]))]
 

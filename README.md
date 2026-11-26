@@ -25,8 +25,8 @@ for live mode (Gemini `gemini-3.5-flash-lite`, or `LLM=gemma` for the big hosted
 | featherweight feature | Where |
 |---|---|
 | A streaming chat agent, streamed over AG-UI | `backend/concierge/chat.py` |
-| A background agent: the chat starts a job and carries on | `Concierge.background_agents` |
-| A background agent on a separate worker, with one MCP tool | `backend/concierge/research.py` |
+| A background job: the chat starts a job and carries on | `Concierge.background_jobs` |
+| A background job on a separate worker, with one MCP tool | `backend/concierge/research.py` |
 | An agent using an MCP server that runs in its own container | `backend/concierge/mcp.py` |
 | A resumable job: fails after its first agent, retry reuses it | `backend/concierge/booking_prep.py` |
 | Your own queue and result store, checked with the conformance kits | `backend/concierge/fw_adapters.py` |

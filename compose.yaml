@@ -74,5 +74,19 @@ services:
     ports:
       - "16686:16686"
 
+  dev:  # tests, lint and format (make test / lint / fmt). Never reads .env: demo models only, so no real model call
+    profiles: ["dev"]
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    volumes:
+      - .:/app
+    environment:
+      DEMO_MODE: "1"
+      GOOGLE_API_KEY: ""
+      TEST_ADMIN_URL: postgresql://concierge:concierge@postgres:5432/concierge
+    depends_on:
+      postgres: { condition: service_healthy }
+
 volumes:
   pgdata:

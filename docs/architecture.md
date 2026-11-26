@@ -51,6 +51,6 @@ Agents never touch these tables. They reach providers and availability only thro
 
 | | `Researcher` (an agent) | `prepare_booking` (a job) |
 |---|---|---|
-| Started by | The chat agent, as a **background agent** | The "Prepare booking" button, with `client.submit(..., resumable=True)` |
+| Started by | The chat agent, as a **background job** | The "Prepare booking" button, with `client.submit(..., resumable=True)` |
 | Agents | `Researcher`: one agent, one MCP tool that sleeps and returns the findings | `BookingBriefer`, then `ConfirmationWriter` |
 | Retry | A new run with the same request | **Resume**: the finished first agent is reused |

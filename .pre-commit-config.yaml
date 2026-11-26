@@ -1,0 +1,25 @@
+# The project's checks. There is no CI: these local hooks are the checks. Install once per clone with `make hooks`.
+# They run in Docker (see the Makefile), so Docker must be running.
+repos:
+  - repo: local
+    hooks:
+      - id: lint
+        name: lint
+        entry: make lint
+        language: system
+        pass_filenames: false
+      - id: format
+        name: format check
+        entry: make fmt-check
+        language: system
+        pass_filenames: false
+      - id: test
+        name: tests
+        entry: make test
+        language: system
+        pass_filenames: false
+      - id: conventional-commit
+        name: conventional commit message
+        entry: sh scripts/check-commit-msg.sh
+        language: system
+        stages: [commit-msg]

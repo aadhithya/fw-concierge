@@ -1,18 +1,18 @@
 """The research agent: one agent, one MCP tool.
 
-The chat starts this agent as a background agent (a worker runs it). Its only tool, `search_providers`, comes from an MCP server in
+The chat starts this agent as a background job (a worker runs it). Its only tool, `search_providers`, comes from an MCP server in
 a container of its own (mcp.py): the tool takes a while and returns the matching providers with their open slots. The agent calls it
 once and forwards what it returned as its result, which is what the research card shows.
 """
 
 from typing import ClassVar
 
+from featherweight import AgentBase, AgentInput, AgentOutput, HttpMCPServer, ModelSettings
 from pydantic import BaseModel, Field
 
 from concierge.config import PROVIDER_SERVICE_URL
 from concierge.domain import Provider, SearchRequest, Slot
 from concierge.models import model_for
-from featherweight import AgentBase, AgentInput, AgentOutput, HttpMCPServer, ModelSettings
 
 
 class ResearchInput(AgentInput, SearchRequest):

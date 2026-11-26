@@ -13,21 +13,21 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from featherweight import AgentRunner, AttachmentLimitError, BadRequest, PostgresDatabase, Status
+from featherweight.adapters import agui
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from concierge import deps
+from concierge.booking_prep import PrepareInput, prepare_booking
 from concierge.chat import Concierge
 from concierge.client import ControlledJobClient, provider_sleep
 from concierge.config import DATABASE_URL, STATIC_DIR
 from concierge.domain import Database, PgAvailability, PgCatalog, Repository, SearchRequest, SlotTaken
 from concierge.fw_adapters import PostgresQueue, PostgresResultStore
-from concierge.booking_prep import PrepareInput, prepare_booking
-from concierge.research import ResearchInput, Researcher
+from concierge.research import Researcher, ResearchInput
 from concierge.schemas import BookingIn, PrepareIn, RetryPreparationIn, RetryResearchIn
-from concierge.wake import FINAL, wake_text
 from concierge.telemetry import setup as setup_telemetry
-from featherweight import AgentRunner, BadRequest, JobClient, PostgresDatabase, RunStatus
-from featherweight.adapters import agui
+from concierge.wake import FINAL, delivered, noting_delivered, wake_text
 
 
 @asynccontextmanager
@@ -44,6 +44,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="fw-concierge (simulated)", lifespan=lifespan)
 FastAPIInstrumentor.instrument_app(app, excluded_urls="/api/health", exclude_spans=["send", "receive"])
+
+
+@app.exception_handler(AttachmentLimitError)
+async def attachment_refused(request: Request, exc: AttachmentLimitError):
+    """A chat message with a file: the concierge takes text only. 413, as featherweight's guide suggests."""
+    return JSONResponse({"error": str(exc)}, status_code=413)
 
 
 @app.exception_handler(BadRequest)
@@ -63,20 +69,25 @@ async def agui_chat(request: Request):
     """POST /api/agui: one chat turn, streamed as AG-UI events.
 
     The browser sends the whole conversation (featherweight keeps none); `agui.parse_request` reads it, `runner.stream` runs the
-    concierge agent, and `agui.encode` streams its words and events back. When the chat starts the research (a background agent),
+    concierge agent, and `agui.encode` streams its words and events back. When the chat starts the research (a background job),
     the stream carries a `background_started` event with the job id. The `x-provider-sleep` header is a demo control (see below).
     """
     sleep = request.headers.get("x-provider-sleep")  # demo control: how long the mock provider service takes
     provider_sleep.set(min(max(float(sleep), 0), 20) if sleep else None)
     run = deps.runner.stream(Concierge, agui.parse_request(await request.body()))
-    return StreamingResponse(agui.encode(run), headers=agui.HEADERS, media_type=agui.CONTENT_TYPE)
+    # noting_delivered: remembers a research result that this turn already received, so the chat is not woken for it (wake.py)
+    stream = noting_delivered(run, agui.encode(run))
+    return StreamingResponse(stream, headers=agui.HEADERS, media_type=agui.CONTENT_TYPE)
 
 
 # ------------------------------------------------------------------------------------------------------------------ jobs
 
 STATES = {  # featherweight's job status -> the lifecycle the UI shows
-    RunStatus.INIT: "queued", RunStatus.RUNNING: "running", RunStatus.SUCCESS: "completed",
-    RunStatus.FAILED: "failed", RunStatus.CANCELLED: "cancelled",
+    Status.INIT: "queued",
+    Status.RUNNING: "running",
+    Status.SUCCESS: "completed",
+    Status.FAILED: "failed",
+    Status.CANCELLED: "cancelled",
 }
 
 
@@ -91,12 +102,14 @@ async def job_view(job_id: str) -> dict:
     try:
         row = await deps.client.status(job_id)
     except Exception:
-        raise HTTPException(404, "No such job")
+        raise HTTPException(404, "No such job") from None
     criteria = await deps.repo.get_request(job_id)
     state = STATES[row.status]
     booking = await deps.repo.booking_for_job(job_id)
     wake = None
-    if state in FINAL:  # what the chat must hear about this ending (see wake.py); the browser sends it as the next turn
+    if (
+        state in FINAL and job_id not in delivered
+    ):  # what the chat must hear about this ending (see wake.py); the browser sends it as the next turn
         try:
             wake = await wake_text(job_id, state)
         except Exception:  # never let this break the job view: the card still shows the state
@@ -136,7 +149,7 @@ async def job_stream(job_id: str, request: Request):
     try:
         await deps.client.status(job_id)  # 404 early
     except Exception:
-        raise HTTPException(404, "No such job")
+        raise HTTPException(404, "No such job") from None
 
     async def events():
         nonlocal after
@@ -153,7 +166,9 @@ async def job_stream(job_id: str, request: Request):
                 return
             await asyncio.sleep(0.5)
 
-    return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    return StreamingResponse(
+        events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
 
 
 @app.post("/api/jobs/{job_id}/retry")
@@ -166,7 +181,6 @@ async def retry_job(job_id: str, body: RetryResearchIn | None = None):
     if body and body.provider_sleep_seconds is not None:
         criteria = criteria.model_copy(update={"provider_sleep_seconds": body.provider_sleep_seconds})
     return {"job_id": await deps.client.submit(Researcher, ResearchInput.model_validate(criteria.model_dump()))}
-
 
 
 # ------------------------------------------------------------------------------------------ prepare booking (resumable job)
@@ -192,7 +206,7 @@ async def get_preparation(job_id: str):
     try:
         row = await deps.client.status(job_id)
     except Exception:
-        raise HTTPException(404, "No such job")
+        raise HTTPException(404, "No such job") from None
     prep = await deps.repo.get_preparation(job_id)
     return {
         "job_id": job_id,
@@ -211,7 +225,9 @@ async def retry_preparation(job_id: str, body: RetryPreparationIn | None = None)
     if prep is None or STATES[(await deps.client.status(job_id)).status] != "failed":
         raise HTTPException(409, "Only a failed preparation can be retried")
     again = PrepareInput(
-        research_job_id=prep["research_job_id"], provider_id=prep["provider_id"], slot_id=prep["slot_id"],
+        research_job_id=prep["research_job_id"],
+        provider_id=prep["provider_id"],
+        slot_id=prep["slot_id"],
         simulate_failure=bool(body and body.simulate_failure),
     )
     return {"job_id": await deps.client.submit(prepare_booking, again, resumable=True, resume_from=job_id)}
@@ -244,11 +260,13 @@ async def create_booking(body: BookingIn):
         raise HTTPException(404, "No such job")
     try:
         booking, created = await deps.repo.book(
-            idempotency_key=body.idempotency_key, job_id=body.job_id,
-            provider_id=body.provider_id, slot_id=body.slot_id,
+            idempotency_key=body.idempotency_key,
+            job_id=body.job_id,
+            provider_id=body.provider_id,
+            slot_id=body.slot_id,
         )
     except SlotTaken as exc:
-        raise HTTPException(409, str(exc))
+        raise HTTPException(409, str(exc)) from exc
     return JSONResponse(await booking_view(booking), status_code=201 if created else 200)
 
 
