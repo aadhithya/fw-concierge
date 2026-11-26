@@ -8,12 +8,12 @@ only the second agent runs again. Booking itself is not here: it stays a plain a
 
 from typing import ClassVar
 
+from featherweight import AgentBase, AgentInput, AgentOutput, JobContext, ModelSettings, RunStatus, job
 from pydantic import BaseModel, Field
 
 from concierge import deps
 from concierge.domain import Provider, SearchRequest, Slot
 from concierge.models import model_for
-from featherweight import AgentBase, AgentInput, AgentOutput, JobContext, ModelSettings, RunStatus, job
 
 
 class PrepareInput(BaseModel):

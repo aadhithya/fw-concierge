@@ -2,10 +2,11 @@
 
 import contextvars
 
+from featherweight import JobClient
+
 from concierge import deps
 from concierge.domain import SearchRequest
 from concierge.research import ResearchInput
-from featherweight import JobClient
 
 # The chat's model builds the job's input, so a demo control from the UI cannot come from the model. The chat endpoint notes it for
 # this request, and this client applies it when the chat's `start_background` submits the research.

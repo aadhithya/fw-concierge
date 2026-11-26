@@ -13,21 +13,21 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from featherweight import AgentRunner, BadRequest, PostgresDatabase, RunStatus
+from featherweight.adapters import agui
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from concierge import deps
+from concierge.booking_prep import PrepareInput, prepare_booking
 from concierge.chat import Concierge
 from concierge.client import ControlledJobClient, provider_sleep
 from concierge.config import DATABASE_URL, STATIC_DIR
 from concierge.domain import Database, PgAvailability, PgCatalog, Repository, SearchRequest, SlotTaken
 from concierge.fw_adapters import PostgresQueue, PostgresResultStore
-from concierge.booking_prep import PrepareInput, prepare_booking
-from concierge.research import ResearchInput, Researcher
+from concierge.research import Researcher, ResearchInput
 from concierge.schemas import BookingIn, PrepareIn, RetryPreparationIn, RetryResearchIn
-from concierge.wake import FINAL, wake_text
 from concierge.telemetry import setup as setup_telemetry
-from featherweight import AgentRunner, BadRequest, JobClient, PostgresDatabase, RunStatus
-from featherweight.adapters import agui
+from concierge.wake import FINAL, wake_text
 
 
 @asynccontextmanager
@@ -75,8 +75,11 @@ async def agui_chat(request: Request):
 # ------------------------------------------------------------------------------------------------------------------ jobs
 
 STATES = {  # featherweight's job status -> the lifecycle the UI shows
-    RunStatus.INIT: "queued", RunStatus.RUNNING: "running", RunStatus.SUCCESS: "completed",
-    RunStatus.FAILED: "failed", RunStatus.CANCELLED: "cancelled",
+    RunStatus.INIT: "queued",
+    RunStatus.RUNNING: "running",
+    RunStatus.SUCCESS: "completed",
+    RunStatus.FAILED: "failed",
+    RunStatus.CANCELLED: "cancelled",
 }
 
 
@@ -91,7 +94,7 @@ async def job_view(job_id: str) -> dict:
     try:
         row = await deps.client.status(job_id)
     except Exception:
-        raise HTTPException(404, "No such job")
+        raise HTTPException(404, "No such job") from None
     criteria = await deps.repo.get_request(job_id)
     state = STATES[row.status]
     booking = await deps.repo.booking_for_job(job_id)
@@ -136,7 +139,7 @@ async def job_stream(job_id: str, request: Request):
     try:
         await deps.client.status(job_id)  # 404 early
     except Exception:
-        raise HTTPException(404, "No such job")
+        raise HTTPException(404, "No such job") from None
 
     async def events():
         nonlocal after
@@ -153,7 +156,9 @@ async def job_stream(job_id: str, request: Request):
                 return
             await asyncio.sleep(0.5)
 
-    return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    return StreamingResponse(
+        events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
 
 
 @app.post("/api/jobs/{job_id}/retry")
@@ -166,7 +171,6 @@ async def retry_job(job_id: str, body: RetryResearchIn | None = None):
     if body and body.provider_sleep_seconds is not None:
         criteria = criteria.model_copy(update={"provider_sleep_seconds": body.provider_sleep_seconds})
     return {"job_id": await deps.client.submit(Researcher, ResearchInput.model_validate(criteria.model_dump()))}
-
 
 
 # ------------------------------------------------------------------------------------------ prepare booking (resumable job)
@@ -192,7 +196,7 @@ async def get_preparation(job_id: str):
     try:
         row = await deps.client.status(job_id)
     except Exception:
-        raise HTTPException(404, "No such job")
+        raise HTTPException(404, "No such job") from None
     prep = await deps.repo.get_preparation(job_id)
     return {
         "job_id": job_id,
@@ -211,7 +215,9 @@ async def retry_preparation(job_id: str, body: RetryPreparationIn | None = None)
     if prep is None or STATES[(await deps.client.status(job_id)).status] != "failed":
         raise HTTPException(409, "Only a failed preparation can be retried")
     again = PrepareInput(
-        research_job_id=prep["research_job_id"], provider_id=prep["provider_id"], slot_id=prep["slot_id"],
+        research_job_id=prep["research_job_id"],
+        provider_id=prep["provider_id"],
+        slot_id=prep["slot_id"],
         simulate_failure=bool(body and body.simulate_failure),
     )
     return {"job_id": await deps.client.submit(prepare_booking, again, resumable=True, resume_from=job_id)}
@@ -244,11 +250,13 @@ async def create_booking(body: BookingIn):
         raise HTTPException(404, "No such job")
     try:
         booking, created = await deps.repo.book(
-            idempotency_key=body.idempotency_key, job_id=body.job_id,
-            provider_id=body.provider_id, slot_id=body.slot_id,
+            idempotency_key=body.idempotency_key,
+            job_id=body.job_id,
+            provider_id=body.provider_id,
+            slot_id=body.slot_id,
         )
     except SlotTaken as exc:
-        raise HTTPException(409, str(exc))
+        raise HTTPException(409, str(exc)) from exc
     return JSONResponse(await booking_view(booking), status_code=201 if created else 200)
 
 

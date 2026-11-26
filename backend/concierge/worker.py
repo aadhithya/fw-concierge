@@ -2,14 +2,15 @@
 
 import asyncio
 
+from featherweight import AgentRunner, JobWorker, PostgresDatabase
+
 from concierge import deps
+from concierge.booking_prep import prepare_booking
 from concierge.config import DATABASE_URL
 from concierge.domain import Database, PgAvailability, PgCatalog, Repository
 from concierge.fw_adapters import PostgresQueue, PostgresResultStore
-from concierge.booking_prep import prepare_booking
 from concierge.research import Researcher
 from concierge.telemetry import setup as setup_telemetry
-from featherweight import AgentRunner, JobWorker, PostgresDatabase
 
 
 async def main() -> None:

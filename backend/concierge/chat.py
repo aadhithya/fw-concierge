@@ -10,13 +10,13 @@ the user), submits the job to the queue, and returns the job id at once. A worke
 
 from datetime import date
 
+from featherweight import ModelSettings, StreamingAgent
 from langchain_core.tools import tool
 from pydantic import Field
 
 from concierge.domain import NEIGHBOURHOODS, REGION
 from concierge.models import model_for
 from concierge.research import Researcher
-from featherweight import ModelSettings, StreamingAgent
 
 
 @tool

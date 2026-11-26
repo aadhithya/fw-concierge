@@ -27,7 +27,10 @@ async def search_providers(
     providers (at most 3, best first), each with its open slots and the reasons it fits."""
     await asyncio.sleep(min(max(sleep_seconds, 0), 20))  # the simulated slow service
     request = SearchRequest(
-        location=location, date_from=date.fromisoformat(date_from), date_to=date.fromisoformat(date_to), preferences=preferences or []
+        location=location,
+        date_from=date.fromisoformat(date_from),
+        date_to=date.fromisoformat(date_to),
+        preferences=preferences or [],
     )
     async with Database(DATABASE_URL) as db:
         catalog, availability = PgCatalog(db), PgAvailability(db)

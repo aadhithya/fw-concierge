@@ -13,16 +13,16 @@ import time
 
 import psycopg
 import pytest
+from featherweight import AgentRunner, JobWorker, PostgresDatabase
 
 from concierge import deps
 from concierge.booking_prep import prepare_booking
+from concierge.client import ControlledJobClient
 from concierge.domain import Database, PgAvailability, PgCatalog, Repository
 from concierge.fw_adapters import PostgresQueue, PostgresResultStore
 from concierge.migrate import migrate
 from concierge.research import Researcher
 from concierge.seed import seed
-from concierge.client import ControlledJobClient
-from featherweight import AgentRunner, JobWorker, PostgresDatabase
 from tests.test_adapters import ADMIN_DSN, DSN
 
 
@@ -48,14 +48,18 @@ async def stack(provider_service):
             await admin.execute("CREATE DATABASE concierge_test")
     await migrate(DSN)
     async with await psycopg.AsyncConnection.connect(DSN, autocommit=True) as conn:
-        await conn.execute("TRUNCATE app.bookings, app.preparations, app.appointment_requests, app.job_progress, app.job_results, fw_adapters.job_queue CASCADE")
+        await conn.execute(
+            "TRUNCATE app.bookings, app.preparations, app.appointment_requests, app.job_progress, app.job_results, fw_adapters.job_queue CASCADE"
+        )
         await conn.execute("UPDATE app.availability_slots SET status = 'open'")
         await seed(conn)
     async with Database(DSN) as app_db, PostgresDatabase(DSN) as db:
         deps.repo, deps.catalog, deps.availability = Repository(app_db), PgCatalog(app_db), PgAvailability(app_db)
         queue, results = PostgresQueue(app_db.pool, db), PostgresResultStore(app_db.pool)
         deps.client = ControlledJobClient(db, queue, results)
-        worker = JobWorker(db, queue, AgentRunner(db, results=results, retry_delay_s=0), jobs=[Researcher, prepare_booking], results=results)
+        worker = JobWorker(
+            db, queue, AgentRunner(db, results=results, retry_delay_s=0), jobs=[Researcher, prepare_booking], results=results
+        )
         running = asyncio.create_task(worker.run())
         async with AgentRunner(db, results=results, background=deps.client) as runner:
             deps.runner = runner

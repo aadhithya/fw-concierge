@@ -8,12 +8,12 @@ import os
 
 import psycopg
 import pytest
+from featherweight import PostgresDatabase, testing
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from concierge.fw_adapters import PostgresQueue, PostgresResultStore
 from concierge.migrate import migrate
-from featherweight import PostgresDatabase, testing
 
 ADMIN_DSN = os.environ.get("TEST_ADMIN_URL", "postgresql://concierge:concierge@localhost:5433/concierge")
 DSN = ADMIN_DSN.rsplit("/", 1)[0] + "/concierge_test"

@@ -8,12 +8,11 @@ import asyncio
 import logging
 import time
 
-from psycopg.types.json import Jsonb
-from psycopg_pool import AsyncConnectionPool
-
 from featherweight import Delivery, JobMessage, JobQueue, ResultKey, ResultStore
 from featherweight.fingerprint import text_hash
 from featherweight.queue import DEAD_LETTERED
+from psycopg.types.json import Jsonb
+from psycopg_pool import AsyncConnectionPool
 
 log = logging.getLogger(__name__)
 
@@ -98,7 +97,9 @@ class PostgresQueue(JobQueue):
         where = "WHERE seq = %s AND state = 'claimed' AND delivery_count = %s"
         async with self.pool.connection() as conn:
             if requeue:  # back to ready, keeping its place in the order
-                await conn.execute(f"UPDATE fw_adapters.job_queue SET state = 'ready', lease_expires_at = NULL {where}", (seq, count))
+                await conn.execute(
+                    f"UPDATE fw_adapters.job_queue SET state = 'ready', lease_expires_at = NULL {where}", (seq, count)
+                )
             else:
                 await conn.execute(f"DELETE FROM fw_adapters.job_queue {where}", (seq, count))
 

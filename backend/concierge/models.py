@@ -3,10 +3,10 @@ big hosted Gemma with LLM=gemma. Both use GOOGLE_API_KEY."""
 
 from typing import Any, ClassVar
 
+from featherweight import Gemini, Gemma, ModelSettings
 from pydantic import Field
 
 from concierge.config import DEMO_MODE, LLM
-from featherweight import Gemini, Gemma, ModelSettings
 
 
 class DemoSettings(ModelSettings):

@@ -4,8 +4,9 @@ Each process fills in what it needs once at startup: the worker sets `catalog`, 
 the API sets `repo`, `client` and `runner` (see api.py). Tests can put fakes here.
 """
 
-from concierge.domain import AvailabilityService, ProviderCatalog, Repository
 from featherweight import AgentRunner, JobClient
+
+from concierge.domain import AvailabilityService, ProviderCatalog, Repository
 
 catalog: ProviderCatalog
 availability: AvailabilityService

@@ -7,12 +7,12 @@ once and forwards what it returned as its result, which is what the research car
 
 from typing import ClassVar
 
+from featherweight import AgentBase, AgentInput, AgentOutput, HttpMCPServer, ModelSettings
 from pydantic import BaseModel, Field
 
 from concierge.config import PROVIDER_SERVICE_URL
 from concierge.domain import Provider, SearchRequest, Slot
 from concierge.models import model_for
-from featherweight import AgentBase, AgentInput, AgentOutput, HttpMCPServer, ModelSettings
 
 
 class ResearchInput(AgentInput, SearchRequest):

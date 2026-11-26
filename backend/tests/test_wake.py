@@ -2,6 +2,7 @@
 
 from datetime import date, timedelta
 
+from featherweight import ChatInput
 from langchain_core.messages import HumanMessage
 
 from concierge import deps
@@ -9,12 +10,14 @@ from concierge.booking_prep import PrepareInput, prepare_booking
 from concierge.chat import Concierge
 from concierge.research import Researcher, ResearchInput
 from concierge.wake import wake_text
-from featherweight import ChatInput
 
 
 async def research() -> str:
     request = ResearchInput(
-        location="Haidhausen", date_from=date.today() + timedelta(1), date_to=date.today() + timedelta(7), provider_sleep_seconds=0
+        location="Haidhausen",
+        date_from=date.today() + timedelta(1),
+        date_to=date.today() + timedelta(7),
+        provider_sleep_seconds=0,
     )
     job_id = await deps.client.submit(Researcher, request)
     assert (await deps.client.wait(job_id, timeout=30)).status.value == "SUCCESS"

@@ -5,13 +5,13 @@ and resumes, and booking is idempotent. Runs in its own database (`concierge_tes
 """
 
 import pytest
+from featherweight import ChatInput
 from langchain_core.messages import HumanMessage
 
 from concierge import deps
 from concierge.booking_prep import PrepareInput, prepare_booking
 from concierge.chat import Concierge
 from concierge.research import Researcher
-from featherweight import ChatInput
 
 
 async def test_demo_flow(stack):
