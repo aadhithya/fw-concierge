@@ -1,0 +1,9 @@
+# Tests, linting and formatting run in this image, so nothing is installed on the host. The source is mounted, not copied.
+FROM python:3.13-slim
+RUN pip install --no-cache-dir uv
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv UV_CACHE_DIR=/tmp/uv UV_NO_SYNC=1
+WORKDIR /deps
+COPY backend/pyproject.toml backend/uv.lock ./
+RUN uv sync --frozen --no-install-project
+ENV PATH=/opt/venv/bin:$PATH HOME=/tmp PYTHONPATH=/app/backend PYTHONPYCACHEPREFIX=/tmp/pycache RUFF_CACHE_DIR=/tmp/ruff
+WORKDIR /app/backend
