@@ -8,7 +8,11 @@ How the pieces work. Read it next to the code: each section names the file.
 `agui.encode`. featherweight streams the words, the step events and the tool calls to the browser as AG-UI events, so the app builds
 no events by hand. The client sends the whole conversation each turn; featherweight keeps none.
 
-The research is a **background agent**: `background_agents = [Researcher]`. The framework gives the model a
+**Text only.** featherweight 0.2 accepts files in a chat unless the agent says otherwise, and sends them to the model's provider. The
+concierge sets `max_attachments = 0`: a message with a file is refused with a 413, and the composer has no attach button, drop zone or
+paste of files.
+
+The research is a **background job**: `background_jobs = [Researcher]`. The framework gives the model a
 `start_background` tool and checks the model's input against the agent's input model, `ResearchInput` (the typed search request, built on
 `SearchRequest` in `domain.py`). A value that is
 missing or invalid is refused with a message the model reads, and the model asks the user. When the input is valid the framework
@@ -30,13 +34,21 @@ is the application's job (the "session that wakes itself" in the featherweight g
 3. The concierge's prompt tells it how to treat a message that starts with `<background_result>`: summarise a success, report a
    failure and point to Retry. The thread shows a one-line notice instead of the raw message.
 
+**When no wake is needed.** If the research ends while the turn that started it is still working, and the model is called again,
+featherweight gives that turn the result. It is in `run.new_messages` but not on the stream, so the browser cannot tell. The API
+passes the stream through `noting_delivered` (`wake.py`), which notes such results before sending the next piece, and the job response
+then carries no `wake`. Right before waking, the browser reads the job again. If the research ends during the turn's last reply, the
+turn did not get it and the wake is sent as usual. The note is kept in the API process only: after an API restart, an open page could
+tell the model about such a job a second time. The browser's copy of the conversation does not hold a result delivered this way, only
+the model's reply to it.
+
 Guards, so it stays robust: only a card started in the live conversation wakes the chat (the card restored after a refresh never does); each job wakes the chat once (in memory and in `localStorage`, marked just before the message is appended); the
 wake waits while the chat is running; and a failure to build the message never breaks the job view. A retried research is a new
 job, so it wakes the chat again when it ends.
 
 ## The research agent (`research.py`, `mcp.py`)
 
-The research is **one agent with one MCP tool**. The chat starts it as a background agent, and a worker runs it (an agent class can be
+The research is **one agent with one MCP tool**. The chat starts it as a background job, and a worker runs it (an agent class can be
 a job: the worker lists `Researcher` in its `jobs`). Its input, `ResearchInput`, is the typed search request.
 
 1. The agent calls its only tool, `providers_search_providers`, once, with the request's location, dates and preferences.
