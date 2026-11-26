@@ -8,6 +8,8 @@ CREATE TABLE fw_adapters.job_queue (
     job_name         text NOT NULL,
     input            jsonb NOT NULL,
     trace_context    jsonb NOT NULL DEFAULT '{}',
+    identity         jsonb,          -- who the job is for (featherweight carries it; this app sets none)
+    identity_kind    text,           -- the name of the identity's class
     state            text NOT NULL DEFAULT 'ready' CHECK (state IN ('ready', 'claimed', 'dead')),
     delivery_count   int NOT NULL DEFAULT 0,
     lease_expires_at timestamptz

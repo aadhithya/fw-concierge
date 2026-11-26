@@ -1,4 +1,4 @@
-"""Shared test setup: the whole stack in-process, on its own database (`concierge_test`), with the demo (fake) models."""
+"""Shared test setup: the whole stack in-process, on its own test database (see test_adapters.py), with the demo (fake) models."""
 
 import os
 
@@ -20,10 +20,9 @@ from concierge.booking_prep import prepare_booking
 from concierge.client import ControlledJobClient
 from concierge.domain import Database, PgAvailability, PgCatalog, Repository
 from concierge.fw_adapters import PostgresQueue, PostgresResultStore
-from concierge.migrate import migrate
 from concierge.research import Researcher
 from concierge.seed import seed
-from tests.test_adapters import ADMIN_DSN, DSN
+from tests.test_adapters import DSN, create_test_database
 
 
 @pytest.fixture(scope="session")
@@ -39,14 +38,12 @@ def provider_service():
             time.sleep(0.1)
     yield
     process.terminate()
+    process.wait(timeout=10)
 
 
 @pytest.fixture
 async def stack(provider_service):
-    async with await psycopg.AsyncConnection.connect(ADMIN_DSN, autocommit=True) as admin:
-        if not await (await admin.execute("SELECT 1 FROM pg_database WHERE datname = 'concierge_test'")).fetchone():
-            await admin.execute("CREATE DATABASE concierge_test")
-    await migrate(DSN)
+    await create_test_database()
     async with await psycopg.AsyncConnection.connect(DSN, autocommit=True) as conn:
         await conn.execute(
             "TRUNCATE app.bookings, app.preparations, app.appointment_requests, app.job_progress, app.job_results, fw_adapters.job_queue CASCADE"

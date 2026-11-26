@@ -13,7 +13,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from featherweight import AgentRunner, BadRequest, PostgresDatabase, RunStatus
+from featherweight import AgentRunner, AttachmentLimitError, BadRequest, PostgresDatabase, Status
 from featherweight.adapters import agui
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
@@ -27,7 +27,7 @@ from concierge.fw_adapters import PostgresQueue, PostgresResultStore
 from concierge.research import Researcher, ResearchInput
 from concierge.schemas import BookingIn, PrepareIn, RetryPreparationIn, RetryResearchIn
 from concierge.telemetry import setup as setup_telemetry
-from concierge.wake import FINAL, wake_text
+from concierge.wake import FINAL, delivered, noting_delivered, wake_text
 
 
 @asynccontextmanager
@@ -44,6 +44,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="fw-concierge (simulated)", lifespan=lifespan)
 FastAPIInstrumentor.instrument_app(app, excluded_urls="/api/health", exclude_spans=["send", "receive"])
+
+
+@app.exception_handler(AttachmentLimitError)
+async def attachment_refused(request: Request, exc: AttachmentLimitError):
+    """A chat message with a file: the concierge takes text only. 413, as featherweight's guide suggests."""
+    return JSONResponse({"error": str(exc)}, status_code=413)
 
 
 @app.exception_handler(BadRequest)
@@ -63,23 +69,25 @@ async def agui_chat(request: Request):
     """POST /api/agui: one chat turn, streamed as AG-UI events.
 
     The browser sends the whole conversation (featherweight keeps none); `agui.parse_request` reads it, `runner.stream` runs the
-    concierge agent, and `agui.encode` streams its words and events back. When the chat starts the research (a background agent),
+    concierge agent, and `agui.encode` streams its words and events back. When the chat starts the research (a background job),
     the stream carries a `background_started` event with the job id. The `x-provider-sleep` header is a demo control (see below).
     """
     sleep = request.headers.get("x-provider-sleep")  # demo control: how long the mock provider service takes
     provider_sleep.set(min(max(float(sleep), 0), 20) if sleep else None)
     run = deps.runner.stream(Concierge, agui.parse_request(await request.body()))
-    return StreamingResponse(agui.encode(run), headers=agui.HEADERS, media_type=agui.CONTENT_TYPE)
+    # noting_delivered: remembers a research result that this turn already received, so the chat is not woken for it (wake.py)
+    stream = noting_delivered(run, agui.encode(run))
+    return StreamingResponse(stream, headers=agui.HEADERS, media_type=agui.CONTENT_TYPE)
 
 
 # ------------------------------------------------------------------------------------------------------------------ jobs
 
 STATES = {  # featherweight's job status -> the lifecycle the UI shows
-    RunStatus.INIT: "queued",
-    RunStatus.RUNNING: "running",
-    RunStatus.SUCCESS: "completed",
-    RunStatus.FAILED: "failed",
-    RunStatus.CANCELLED: "cancelled",
+    Status.INIT: "queued",
+    Status.RUNNING: "running",
+    Status.SUCCESS: "completed",
+    Status.FAILED: "failed",
+    Status.CANCELLED: "cancelled",
 }
 
 
@@ -99,7 +107,9 @@ async def job_view(job_id: str) -> dict:
     state = STATES[row.status]
     booking = await deps.repo.booking_for_job(job_id)
     wake = None
-    if state in FINAL:  # what the chat must hear about this ending (see wake.py); the browser sends it as the next turn
+    if (
+        state in FINAL and job_id not in delivered
+    ):  # what the chat must hear about this ending (see wake.py); the browser sends it as the next turn
         try:
             wake = await wake_text(job_id, state)
         except Exception:  # never let this break the job view: the card still shows the state

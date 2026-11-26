@@ -30,8 +30,16 @@ class PostgresQueue(JobQueue):
     async def enqueue(self, message: JobMessage) -> None:
         async with self.pool.connection() as conn:
             await conn.execute(
-                "INSERT INTO fw_adapters.job_queue (job_id, job_name, input, trace_context) VALUES (%s, %s, %s, %s)",
-                (message.job_id, message.job_name, Jsonb(message.input), Jsonb(message.trace_context)),
+                "INSERT INTO fw_adapters.job_queue (job_id, job_name, input, trace_context, identity, identity_kind) "
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                (
+                    message.job_id,
+                    message.job_name,
+                    Jsonb(message.input),
+                    Jsonb(message.trace_context),
+                    None if message.identity is None else Jsonb(message.identity),
+                    message.identity_kind,
+                ),
             )
 
     async def _claim(self) -> Delivery | None:
@@ -54,7 +62,7 @@ class PostgresQueue(JobQueue):
                        SET state = 'claimed', delivery_count = q.delivery_count + 1,
                            lease_expires_at = clock_timestamp() + make_interval(secs => %s)
                        FROM next WHERE q.seq = next.seq
-                       RETURNING q.seq, q.job_id, q.job_name, q.input, q.trace_context, q.delivery_count""",
+                       RETURNING q.seq, q.job_id, q.job_name, q.input, q.trace_context, q.identity, q.identity_kind, q.delivery_count""",
                     (self.lease,),
                 )
             ).fetchone()
@@ -64,7 +72,12 @@ class PostgresQueue(JobQueue):
         if row is None:
             return None
         message = JobMessage(
-            job_id=row["job_id"], job_name=row["job_name"], input=row["input"], trace_context=row["trace_context"]
+            job_id=row["job_id"],
+            job_name=row["job_name"],
+            input=row["input"],
+            trace_context=row["trace_context"],
+            identity=row["identity"],
+            identity_kind=row["identity_kind"],
         )
         return Delivery(message=message, token=f"{row['seq']}:{row['delivery_count']}", delivery_count=row["delivery_count"])
 
